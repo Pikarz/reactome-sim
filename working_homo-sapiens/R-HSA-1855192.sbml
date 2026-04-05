@@ -1,29 +1,29 @@
-<?xml version='1.0' encoding='utf-8' standalone='no'?>
-<sbml xmlns="http://www.sbml.org/sbml/level3/version1/core" level="3" version="1">
+<?xml version='1.0' encoding='utf-8'?>
+<sbml xmlns="http://www.sbml.org/sbml/level3/version1/core" xmlns:bqbiol="http://biomodels.net/biology-qualifiers/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:ns7="http://www.w3.org/1998/math/MathML" xmlns:ns8="http://www.w3.org/1998/Math/MathML" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:vCard="http://www.w3.org/2001/vcard-rdf/3.0#" xmlns:xhtml="http://www.w3.org/1999/xhtml" level="3" version="1">
   <notes>
     <annotation>
-      <p xmlns="http://www.w3.org/1999/xhtml">SBML generated from Reactome version 95 on 11/25/25, 4:14 AM using JSBML version 1.5.</p>
+      <xhtml:p>SBML generated from Reactome version 95 on 11/25/25, 4:14 AM using JSBML version 1.5.</xhtml:p>
     </annotation>
   </notes>
   <model id="pathway_1855192" metaid="metaid_0" name="IPs transport between nucleus and ER lumen">
     <notes>
-      <p xmlns="http://www.w3.org/1999/xhtml">Inositol phosphate IP6 is imported to the endoplasmic reticulum (ER) lumen from the nucleus (Caffrey et al. 1999). The molecular details of these transport processes remain uncertain.</p>
+      <xhtml:p>Inositol phosphate IP6 is imported to the endoplasmic reticulum (ER) lumen from the nucleus (Caffrey et al. 1999). The molecular details of these transport processes remain uncertain.</xhtml:p>
     </notes>
     <annotation>
-      <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:vCard="http://www.w3.org/2001/vcard-rdf/3.0#" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:bqbiol="http://biomodels.net/biology-qualifiers/">
+      <rdf:RDF>
         <rdf:Description rdf:about="#metaid_0">
           <dc:creator>
             <rdf:Bag>
               <rdf:li rdf:parseType="Resource">
                 <vCard:N rdf:parseType="Resource">
                   <vCard:Family>Williams</vCard:Family>
-                  <vCard:Given></vCard:Given>
+                  <vCard:Given />
                 </vCard:N>
               </rdf:li>
               <rdf:li rdf:parseType="Resource">
                 <vCard:N rdf:parseType="Resource">
                   <vCard:Family>Williams</vCard:Family>
-                  <vCard:Given></vCard:Given>
+                  <vCard:Given />
                 </vCard:N>
               </rdf:li>
               <rdf:li rdf:parseType="Resource">
@@ -61,40 +61,39 @@
       </rdf:RDF>
     </annotation>
     <listOfParameters>
-      <!-- Original parameters (Ku, Ur kept for reference but no longer used in reactions) -->
-      <parameter id="Ku" value="10" constant="true"/>
-      <parameter id="Ur" value="0.7" constant="true"/>
-      <parameter id="lambda_1" value="3" constant="true"/>
-      <parameter id="log_K_in" value="0.0" constant="false"/> 
-      <parameter id="log_K_out" value="0.5" constant="false"/>
-      <parameter id="log_lambda_1" value="0.47" constant="false"/>
+      
+      <parameter id="Ku" value="10" constant="true" />
+      <parameter id="Ur" value="0.7" constant="true" />
 
-      <parameter id="K_in" value="1.0" constant="false"/>
-      <parameter id="K_out" value="3.16" constant="false"/>
-      <parameter id="lambda_1" value="3.0" constant="false"/>
+      <parameter id="log_K_in" value="2.5664270768685458" constant="false" /> 
+      <parameter id="log_K_out" value="2.866872925868784" constant="false" />
+      <parameter id="log_lambda_1" value="2.8664958811172028" constant="false" />
+
+      <parameter id="K_in" value="1.0" constant="false" />
+      <parameter id="K_out" value="3.16" constant="false" />
+      <parameter id="lambda_1" value="3.0" constant="false" />
       
       
-      <!-- Point 3: Threshold M for max-tracking constraint -->
-      <parameter id="M" value="1.0" constant="true"/>
-      <!-- Point 4: Small epsilon to avoid division by zero in running mean/moment -->
-      <parameter id="epsilon" value="1e-6" constant="true"/>
-      <!-- Point 5: Target time-averaged means per species (to be matched by optimizer) -->
-      <parameter id="mu_2023929" value="0.5" constant="true"/>
-      <parameter id="mu_2024018" value="0.5" constant="true"/>
-      <!-- Point 3: Auxiliary vars for max-tracking: der(z_i)=0 if x_i<=M else 10, z_i(0)=0 -->
-      <parameter id="z_2023929" value="0" constant="false"/>
-      <parameter id="z_2024018" value="0" constant="false"/>
-      <!-- Point 4: Auxiliary vars for running mean: der(y_i) = (x_i - y_i)/(t + eps) -->
-      <parameter id="y_2023929" value="0" constant="false"/>
-      <parameter id="y_2024018" value="0" constant="false"/>
-      <!-- Point 4: Auxiliary vars for 2nd moment: der(y2_i) = (x_i^2 - y2_i)/(t + eps) -->
-      <parameter id="y2_2023929" value="0" constant="false"/>
-      <parameter id="y2_2024018" value="0" constant="false"/>
+      <parameter id="M" value="1.0" constant="true" />
+      
+      <parameter id="epsilon" value="1e-6" constant="true" />
+      
+      <parameter id="mu_2023929" value="0.5" constant="true" />
+      <parameter id="mu_2024018" value="0.5" constant="true" />
+      
+      <parameter id="z_2023929" value="0" constant="false" />
+      <parameter id="z_2024018" value="0" constant="false" />
+      
+      <parameter id="y_2023929" value="0" constant="false" />
+      <parameter id="y_2024018" value="0" constant="false" />
+      
+      <parameter id="y2_2023929" value="0" constant="false" />
+      <parameter id="y2_2024018" value="0" constant="false" />
     </listOfParameters>
     <listOfCompartments>
       <compartment constant="true" id="compartment_17957" metaid="metaid_2" name="endoplasmic reticulum lumen" sboTerm="SBO:0000290">
         <annotation>
-          <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:bqbiol="http://biomodels.net/biology-qualifiers/">
+          <rdf:RDF>
             <rdf:Description rdf:about="#metaid_2">
               <bqbiol:is>
                 <rdf:Bag>
@@ -107,7 +106,7 @@
       </compartment>
       <compartment constant="true" id="compartment_7660" metaid="metaid_4" name="nucleoplasm" sboTerm="SBO:0000290">
         <annotation>
-          <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:bqbiol="http://biomodels.net/biology-qualifiers/">
+          <rdf:RDF>
             <rdf:Description rdf:about="#metaid_4">
               <bqbiol:is>
                 <rdf:Bag>
@@ -122,10 +121,10 @@
     <listOfSpecies>
       <species boundaryCondition="false" compartment="compartment_17957" constant="false" hasOnlySubstanceUnits="false" id="species_2024018" initialConcentration="0.1" metaid="metaid_1" name="IP6 [endoplasmic reticulum lumen]" sboTerm="SBO:0000247">
         <notes>
-          <p xmlns="http://www.w3.org/1999/xhtml">Derived from a Reactome SimpleEntity. This is a small compound</p>
+          <xhtml:p>Derived from a Reactome SimpleEntity. This is a small compound</xhtml:p>
         </notes>
         <annotation>
-          <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:bqbiol="http://biomodels.net/biology-qualifiers/">
+          <rdf:RDF>
             <rdf:Description rdf:about="#metaid_1">
               <bqbiol:is>
                 <rdf:Bag>
@@ -139,10 +138,10 @@
       </species>
       <species boundaryCondition="false" compartment="compartment_7660" constant="false" hasOnlySubstanceUnits="false" id="species_2023929" initialConcentration="0.3" metaid="metaid_3" name="IP6 [nucleoplasm]" sboTerm="SBO:0000247">
         <notes>
-          <p xmlns="http://www.w3.org/1999/xhtml">Derived from a Reactome SimpleEntity. This is a small compound</p>
+          <xhtml:p>Derived from a Reactome SimpleEntity. This is a small compound</xhtml:p>
         </notes>
         <annotation>
-          <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:bqbiol="http://biomodels.net/biology-qualifiers/">
+          <rdf:RDF>
             <rdf:Description rdf:about="#metaid_3">
               <bqbiol:is>
                 <rdf:Bag>
@@ -158,23 +157,23 @@
     <listOfReactions>
       <reaction compartment="compartment_7660" fast="false" id="reaction_1855187" metaid="metaid_5" name="IP6 transports from the nucleus to the ER lumen" reversible="false">
         <notes>
-          <p xmlns="http://www.w3.org/1999/xhtml">Inositol 1,2,3,4,5,6-hexakisphosphate (IP6) translocates from the nucleus to the endoplasmic reticulum (ER) lumen (Caffrey et al. 1999).</p>
+          <xhtml:p>Inositol 1,2,3,4,5,6-hexakisphosphate (IP6) translocates from the nucleus to the endoplasmic reticulum (ER) lumen (Caffrey et al. 1999).</xhtml:p>
         </notes>
         <annotation>
-          <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:vCard="http://www.w3.org/2001/vcard-rdf/3.0#" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:bqbiol="http://biomodels.net/biology-qualifiers/">
+          <rdf:RDF>
             <rdf:Description rdf:about="#metaid_5">
               <dc:creator>
                 <rdf:Bag>
                   <rdf:li rdf:parseType="Resource">
                     <vCard:N rdf:parseType="Resource">
                       <vCard:Family>Williams</vCard:Family>
-                      <vCard:Given></vCard:Given>
+                      <vCard:Given />
                     </vCard:N>
                   </rdf:li>
                   <rdf:li rdf:parseType="Resource">
                     <vCard:N rdf:parseType="Resource">
                       <vCard:Family>Williams</vCard:Family>
-                      <vCard:Given></vCard:Given>
+                      <vCard:Given />
                     </vCard:N>
                   </rdf:li>
                   <rdf:li rdf:parseType="Resource">
@@ -228,210 +227,205 @@
           <speciesReference constant="true" id="speciesreference_1855187_output_2024018" sboTerm="SBO:0000011" species="species_2024018" stoichiometry="1" />
         </listOfProducts>
         <kineticLaw>
-  <math xmlns="http://www.w3.org/1998/math/MathML">
-    <apply>
-      <times/>
-      <ci> lambda_1 </ci>
-      <apply>
-        <power/>
-        <ci> species_2023929 </ci>
-        <cn type="integer"> 1 </cn>
-      </apply>
-    </apply>
-  </math>
+  <ns7:math>
+    <ns7:apply>
+      <ns7:times />
+      <ns7:ci> lambda_1 </ns7:ci>
+      <ns7:apply>
+        <ns7:power />
+        <ns7:ci> species_2023929 </ns7:ci>
+        <ns7:cn type="integer"> 1 </ns7:cn>
+      </ns7:apply>
+    </ns7:apply>
+  </ns7:math>
 </kineticLaw>
       </reaction>
-      <!-- Point 1: Input reaction: der(x_nucleus) = K_in - lambda_1*x_nucleus
-           K_in is the constant source; the consumption by reaction_1855187 is already accounted for. -->
+      
       <reaction id="reaction_input" reversible="false" fast="false">
         <listOfProducts>
-          <speciesReference species="species_2023929" stoichiometry="1" constant="true"/>
+          <speciesReference species="species_2023929" stoichiometry="1" constant="true" />
         </listOfProducts>
         <kineticLaw>
-          <math xmlns="http://www.w3.org/1998/math/MathML">
-            <ci> K_in </ci>
-          </math>
+          <ns7:math>
+            <ns7:ci> K_in </ns7:ci>
+          </ns7:math>
         </kineticLaw>
       </reaction>
-      <!-- Point 2: Output drain: der(x_ER) = lambda_1*x_nucleus - K_out
-           K_out is a constant drain rate, symmetric to K_in in point 1.
-           Production by reaction_1855187 is already accounted for. -->
+      
       <reaction id="reaction_output_degradation" reversible="false" fast="false">
-        <listOfReactants>
-          <speciesReference species="species_2024018" stoichiometry="1" constant="true"/>
-        </listOfReactants>
-        <kineticLaw>
-          <math xmlns="http://www.w3.org/1998/math/MathML">
-            <ci> K_out </ci>
-          </math>
-        </kineticLaw>
-      </reaction>
+      <listOfReactants>
+        <speciesReference species="species_2024018" stoichiometry="1" constant="true" />
+      </listOfReactants>
+      <kineticLaw>
+        <ns7:math>
+          <ns7:apply>
+            <ns7:times />
+            <ns7:ci> K_out </ns7:ci>
+            <ns7:ci> species_2024018 </ns7:ci>
+          </ns7:apply>
+          </ns7:math>
+      </kineticLaw>
+    </reaction>
     </listOfReactions>
 
-    <!-- Points 3 & 4: Rate rules for auxiliary ODE variables -->
+    
     <listOfRules>
 
-      <!-- Point 4: Running mean of nucleoplasm IP6
-           der(y_2023929) = (species_2023929 - y_2023929) / (time + epsilon)
-           => y_2023929(t) = (1/t) * integral_0^t species_2023929(tau) dtau -->
+      
       <rateRule variable="y_2023929">
-        <math xmlns="http://www.w3.org/1998/math/MathML">
-          <apply>
-            <divide/>
-            <apply>
-              <minus/>
-              <ci> species_2023929 </ci>
-              <ci> y_2023929 </ci>
-            </apply>
-            <apply>
-              <plus/>
-              <csymbol encoding="text" definitionURL="http://www.sbml.org/sbml/symbols/time"> time </csymbol>
-              <ci> epsilon </ci>
-            </apply>
-          </apply>
-        </math>
+        <ns7:math>
+          <ns7:apply>
+            <ns7:divide />
+            <ns7:apply>
+              <ns7:minus />
+              <ns7:ci> species_2023929 </ns7:ci>
+              <ns7:ci> y_2023929 </ns7:ci>
+            </ns7:apply>
+            <ns7:apply>
+              <ns7:plus />
+              <ns7:csymbol encoding="text" definitionURL="http://www.sbml.org/sbml/symbols/time"> time </ns7:csymbol>
+              <ns7:ci> epsilon </ns7:ci>
+            </ns7:apply>
+          </ns7:apply>
+        </ns7:math>
       </rateRule>
 
-      <!-- Point 4: Running mean of ER lumen IP6 -->
+      
       <rateRule variable="y_2024018">
-        <math xmlns="http://www.w3.org/1998/math/MathML">
-          <apply>
-            <divide/>
-            <apply>
-              <minus/>
-              <ci> species_2024018 </ci>
-              <ci> y_2024018 </ci>
-            </apply>
-            <apply>
-              <plus/>
-              <csymbol encoding="text" definitionURL="http://www.sbml.org/sbml/symbols/time"> time </csymbol>
-              <ci> epsilon </ci>
-            </apply>
-          </apply>
-        </math>
+        <ns7:math>
+          <ns7:apply>
+            <ns7:divide />
+            <ns7:apply>
+              <ns7:minus />
+              <ns7:ci> species_2024018 </ns7:ci>
+              <ns7:ci> y_2024018 </ns7:ci>
+            </ns7:apply>
+            <ns7:apply>
+              <ns7:plus />
+              <ns7:csymbol encoding="text" definitionURL="http://www.sbml.org/sbml/symbols/time"> time </ns7:csymbol>
+              <ns7:ci> epsilon </ns7:ci>
+            </ns7:apply>
+          </ns7:apply>
+        </ns7:math>
       </rateRule>
 
-      <!-- Point 4: Running 2nd moment of nucleoplasm IP6
-           der(y2_2023929) = (species_2023929^2 - y2_2023929) / (time + epsilon)
-           Variance  = y2_2023929 - y_2023929^2
-           StdDev    = sqrt(y2_2023929 - y_2023929^2) -->
+      
       <rateRule variable="y2_2023929">
-        <math xmlns="http://www.w3.org/1998/math/MathML">
-          <apply>
-            <divide/>
-            <apply>
-              <minus/>
-              <apply>
-                <power/>
-                <ci> species_2023929 </ci>
-                <cn type="integer"> 2 </cn>
-              </apply>
-              <ci> y2_2023929 </ci>
-            </apply>
-            <apply>
-              <plus/>
-              <csymbol encoding="text" definitionURL="http://www.sbml.org/sbml/symbols/time"> time </csymbol>
-              <ci> epsilon </ci>
-            </apply>
-          </apply>
-        </math>
+        <ns7:math>
+          <ns7:apply>
+            <ns7:divide />
+            <ns7:apply>
+              <ns7:minus />
+              <ns7:apply>
+                <ns7:power />
+                <ns7:ci> species_2023929 </ns7:ci>
+                <ns7:cn type="integer"> 2 </ns7:cn>
+              </ns7:apply>
+              <ns7:ci> y2_2023929 </ns7:ci>
+            </ns7:apply>
+            <ns7:apply>
+              <ns7:plus />
+              <ns7:csymbol encoding="text" definitionURL="http://www.sbml.org/sbml/symbols/time"> time </ns7:csymbol>
+              <ns7:ci> epsilon </ns7:ci>
+            </ns7:apply>
+          </ns7:apply>
+        </ns7:math>
       </rateRule>
 
-      <!-- Point 4: Running 2nd moment of ER lumen IP6 -->
+      
       <rateRule variable="y2_2024018">
-        <math xmlns="http://www.w3.org/1998/math/MathML">
-          <apply>
-            <divide/>
-            <apply>
-              <minus/>
-              <apply>
-                <power/>
-                <ci> species_2024018 </ci>
-                <cn type="integer"> 2 </cn>
-              </apply>
-              <ci> y2_2024018 </ci>
-            </apply>
-            <apply>
-              <plus/>
-              <csymbol encoding="text" definitionURL="http://www.sbml.org/sbml/symbols/time"> time </csymbol>
-              <ci> epsilon </ci>
-            </apply>
-          </apply>
-        </math>
+        <ns7:math>
+          <ns7:apply>
+            <ns7:divide />
+            <ns7:apply>
+              <ns7:minus />
+              <ns7:apply>
+                <ns7:power />
+                <ns7:ci> species_2024018 </ns7:ci>
+                <ns7:cn type="integer"> 2 </ns7:cn>
+              </ns7:apply>
+              <ns7:ci> y2_2024018 </ns7:ci>
+            </ns7:apply>
+            <ns7:apply>
+              <ns7:plus />
+              <ns7:csymbol encoding="text" definitionURL="http://www.sbml.org/sbml/symbols/time"> time </ns7:csymbol>
+              <ns7:ci> epsilon </ns7:ci>
+            </ns7:apply>
+          </ns7:apply>
+        </ns7:math>
       </rateRule>
 
-  <!-- Base change for K_in, K_out, lambda_1-->
+  
   <assignmentRule variable="K_in">
-    <math xmlns="http://www.w3.org/1998/Math/MathML">
-      <apply>
-        <power/>
-        <cn type="integer"> 10 </cn>
-        <ci> log_K_in </ci>
-      </apply>
-    </math>
+    <ns8:math>
+      <ns8:apply>
+        <ns8:power />
+        <ns8:cn type="integer"> 10 </ns8:cn>
+        <ns8:ci> log_K_in </ns8:ci>
+      </ns8:apply>
+    </ns8:math>
   </assignmentRule>
 
   <assignmentRule variable="K_out">
-    <math xmlns="http://www.w3.org/1998/Math/MathML">
-      <apply>
-        <power/>
-        <cn type="integer"> 10 </cn>
-        <ci> log_K_out </ci>
-      </apply>
-    </math>
+    <ns8:math>
+      <ns8:apply>
+        <ns8:power />
+        <ns8:cn type="integer"> 10 </ns8:cn>
+        <ns8:ci> log_K_out </ns8:ci>
+      </ns8:apply>
+    </ns8:math>
   </assignmentRule>
 
   <assignmentRule variable="lambda_1">
-    <math xmlns="http://www.w3.org/1998/Math/MathML">
-      <apply>
-        <power/>
-        <cn type="integer"> 10 </cn>
-        <ci> log_lambda_1 </ci>
-      </apply>
-    </math>
+    <ns8:math>
+      <ns8:apply>
+        <ns8:power />
+        <ns8:cn type="integer"> 10 </ns8:cn>
+        <ns8:ci> log_lambda_1 </ns8:ci>
+      </ns8:apply>
+    </ns8:math>
   </assignmentRule>
 
     </listOfRules>
 
-    <!-- Point 5: Concentration constraints – the time-averaged mean of each species
-         must equal the target (mu_*). The optimizer adjusts K_in/K_out until satisfied. -->
+    
     <listOfConstraints>
       <constraint>
-        <math xmlns="http://www.w3.org/1998/math/MathML">
-          <apply>
-            <leq/>
-            <apply>
-              <abs/>
-              <apply>
-                <minus/>
-                <ci> y_2023929 </ci>
-                <ci> mu_2023929 </ci>
-              </apply>
-            </apply>
-            <cn> 1e-3 </cn>
-          </apply>
-        </math>
+        <ns7:math>
+          <ns7:apply>
+            <ns7:leq />
+            <ns7:apply>
+              <ns7:abs />
+              <ns7:apply>
+                <ns7:minus />
+                <ns7:ci> y_2023929 </ns7:ci>
+                <ns7:ci> mu_2023929 </ns7:ci>
+              </ns7:apply>
+            </ns7:apply>
+            <ns7:cn> 1e-3 </ns7:cn>
+          </ns7:apply>
+        </ns7:math>
         <message>
-          <p xmlns="http://www.w3.org/1999/xhtml">Mean of nucleoplasm IP6 (y_2023929) must equal target mu_2023929 = 0.5</p>
+          <xhtml:p>Mean of nucleoplasm IP6 (y_2023929) must equal target mu_2023929 = 0.5</xhtml:p>
         </message>
       </constraint>
       <constraint>
-        <math xmlns="http://www.w3.org/1998/math/MathML">
-          <apply>
-            <leq/>
-            <apply>
-              <abs/>
-              <apply>
-                <minus/>
-                <ci> y_2024018 </ci>
-                <ci> mu_2024018 </ci>
-              </apply>
-            </apply>
-            <cn> 1e-3 </cn>
-          </apply>
-        </math>
+        <ns7:math>
+          <ns7:apply>
+            <ns7:leq />
+            <ns7:apply>
+              <ns7:abs />
+              <ns7:apply>
+                <ns7:minus />
+                <ns7:ci> y_2024018 </ns7:ci>
+                <ns7:ci> mu_2024018 </ns7:ci>
+              </ns7:apply>
+            </ns7:apply>
+            <ns7:cn> 1e-3 </ns7:cn>
+          </ns7:apply>
+        </ns7:math>
         <message>
-          <p xmlns="http://www.w3.org/1999/xhtml">Mean of ER lumen IP6 (y_2024018) must equal target mu_2024018 = 0.5</p>
+          <xhtml:p>Mean of ER lumen IP6 (y_2024018) must equal target mu_2024018 = 0.5</xhtml:p>
         </message>
       </constraint>
     </listOfConstraints>

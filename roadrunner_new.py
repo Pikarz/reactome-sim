@@ -2,11 +2,13 @@ import os
 from typing import List, Tuple
 import numpy as np
 import roadrunner
+import xml.etree.ElementTree as ET
 import matplotlib.pyplot as plt
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SBML_PATH = os.path.join(_HERE, "working_homo-sapiens", "R-HSA-1855192.sbml")
+_OPTIMIZED_SBML_PATH = os.path.join(_HERE, "working_homo-sapiens", "R-HSA-1855192_optimized.sbml")
 
 
 def load_targets(path: str) -> Tuple[List[str], np.ndarray]:
@@ -194,6 +196,51 @@ def openai_es_minimize(
 
     return 10**best_theta, history
 
+def write_optimized_params_to_sbml(sbml_path, param_map):
+    """
+    Updates parameter values in an SBML file using ElementTree.
+    """
+    # Register namespaces to prevent 'ns0:' prefixes in the output
+    # SBML Level 3 Core namespace is the default
+    prefix_map = {
+        "": "http://www.sbml.org/sbml/level3/version1/core",
+        "xhtml": "http://www.w3.org/1999/xhtml",
+        "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+        "dc": "http://purl.org/dc/elements/1.1/",
+        "vCard": "http://www.w3.org/2001/vcard-rdf/3.0#",
+        "dcterms": "http://purl.org/dc/terms/",
+        "bqbiol": "http://biomodels.net/biology-qualifiers/"
+    }
+    
+    for prefix, uri in prefix_map.items():
+        ET.register_namespace(prefix, uri)
+
+    tree = ET.parse(sbml_path)
+    root = tree.getroot()
+
+    # The parameter tag is usually inside <model><listOfParameters>
+    # We use a wildcard search for 'parameter' tags to be robust
+    updated_count = 0
+    for parameter in root.iter('{http://www.sbml.org/sbml/level3/version1/core}parameter'):
+        p_id = parameter.get('id')
+        if p_id in param_map:
+            # Update the value attribute specifically
+            new_val = str(param_map[p_id])
+            parameter.set('value', new_val)
+            print(f"Updated: {p_id} -> {new_val}")
+            updated_count += 1
+
+    if updated_count == len(param_map):
+        tree.write(sbml_path, encoding='utf-8', xml_declaration=True)
+        print(f"Successfully updated {updated_count} parameters to {sbml_path}")
+    else:
+        found_ids = [p.get('id') for p in root.iter(f"{ns}parameter")]
+        missing = [k for k in param_map.keys() if k not in found_ids]
+        print(f"Error: Only found {updated_count}/{len(param_map)} parameters.")
+        print(f"Missing IDs in SBML: {missing}")
+        print("File was NOT saved.")
+
+
 if __name__ == '__main__':
     rr_init = roadrunner.RoadRunner(_SBML_PATH) # initialize road runner
 
@@ -217,7 +264,7 @@ if __name__ == '__main__':
         targets=target_values,
         learning_rate=0.01,
         sim_start=0.0,
-        sim_end=1000.0,  
+        sim_end=1000000,  
         iterations=1000
     )
 
@@ -236,3 +283,6 @@ if __name__ == '__main__':
     plt.grid(True, which="both", ls="-", alpha=0.5)
     plt.legend()
     plt.show()
+
+    log_results = dict(zip(params_to_tune, np.log10(best_params)))
+    write_optimized_params_to_sbml(_SBML_PATH, log_results)
