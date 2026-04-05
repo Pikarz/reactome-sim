@@ -82,7 +82,7 @@ def objective_function(
 ) -> float:
     # Compute the least-squares objective: F(theta) = sum_i (y_i(theta) - M_i)^2.
     # Here theta is represented in log-space; we exponentiate to enforce positivity of model parameters.
-    params = np.exp(log_params)  # Map log-parameters back to strictly-positive parameters.
+    params = 10**log_params # Map base-10 log parameters back to raw values
     for pid, value in zip(parameter_ids, params):  # Assign each parameter value to the RoadRunner model.
         rr[pid] = float(value) 
 
@@ -194,7 +194,7 @@ def openai_es_minimize(
         if step % 10 == 0 or step == iterations - 1:  # Periodically print progress (and always at the end).
             print(f"iter={step:03d}  F={current_f:.6f}  bestF={best_f:.6f}")  # Status line.
 
-    return np.exp(best_theta), history 
+    return 10**best_theta, history
 
 if __name__ == '__main__':
     rr_init = roadrunner.RoadRunner(_SBML_PATH) # initialize road runner
@@ -207,9 +207,8 @@ if __name__ == '__main__':
 
     species_ids, target_values = load_targets('./test.csv') # load the targets
 
-    initial_vals = np.array([rr_init[p] for p in params_to_tune]) # prepare inital guess theta_0
-    init_log_params = np.log(initial_vals)
-    print(f"Initial values: {initial_vals}")
+    init_log_params = np.random.uniform(-6, 6, size=len(params_to_tune))
+    print(f"Initial raw values: {10**init_log_params}")
 
     print("\n--- Starting OpenAI-ES Optimization ---")
 
