@@ -65,9 +65,15 @@
       <parameter id="Ku" value="10" constant="true"/>
       <parameter id="Ur" value="0.7" constant="true"/>
       <parameter id="lambda_1" value="3" constant="true"/>
-      <!-- Point 1 & 2: Input/output rate parameters (optimized by OpenAI algorithm) -->
-      <parameter id="K_in" value="1.5" constant="true"/>   <!-- der(x_nucleus) = K_in - lambda_1*x_nucleus -->
-      <parameter id="K_out" value="3.0" constant="true"/>  <!-- der(x_ER)     = lambda_1*x_nucleus - K_out*x_ER -->
+      <parameter id="log_K_in" value="0.0" constant="false"/> 
+      <parameter id="log_K_out" value="0.5" constant="false"/>
+      <parameter id="log_lambda_1" value="0.47" constant="false"/>
+
+      <parameter id="K_in" value="1.0" constant="false"/>
+      <parameter id="K_out" value="3.16" constant="false"/>
+      <parameter id="lambda_1" value="3.0" constant="false"/>
+      
+      
       <!-- Point 3: Threshold M for max-tracking constraint -->
       <parameter id="M" value="1.0" constant="true"/>
       <!-- Point 4: Small epsilon to avoid division by zero in running mean/moment -->
@@ -353,6 +359,37 @@
           </apply>
         </math>
       </rateRule>
+
+  <!-- Base change for K_in, K_out, lambda_1-->
+  <assignmentRule variable="K_in">
+    <math xmlns="http://www.w3.org/1998/Math/MathML">
+      <apply>
+        <power/>
+        <cn type="integer"> 10 </cn>
+        <ci> log_K_in </ci>
+      </apply>
+    </math>
+  </assignmentRule>
+
+  <assignmentRule variable="K_out">
+    <math xmlns="http://www.w3.org/1998/Math/MathML">
+      <apply>
+        <power/>
+        <cn type="integer"> 10 </cn>
+        <ci> log_K_out </ci>
+      </apply>
+    </math>
+  </assignmentRule>
+
+  <assignmentRule variable="lambda_1">
+    <math xmlns="http://www.w3.org/1998/Math/MathML">
+      <apply>
+        <power/>
+        <cn type="integer"> 10 </cn>
+        <ci> log_lambda_1 </ci>
+      </apply>
+    </math>
+  </assignmentRule>
 
     </listOfRules>
 

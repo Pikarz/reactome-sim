@@ -82,12 +82,10 @@ def objective_function(
 ) -> float:
     # Compute the least-squares objective: F(theta) = sum_i (y_i(theta) - M_i)^2.
     # Here theta is represented in log-space; we exponentiate to enforce positivity of model parameters.
-    params = 10**log_params # Map base-10 log parameters back to raw values
-    for pid, value in zip(parameter_ids, params):  # Assign each parameter value to the RoadRunner model.
+    for pid, value in zip(parameter_ids, log_params):  # Assign each parameter value to the RoadRunner model.
         rr[pid] = float(value) 
 
-    rr.reset()
-    yi = simulate_terminal_means(rr, species_ids, sim_start, sim_end)  # Simulate to get y_i.
+    yi = simulate_terminal_means(rr, species_ids, sim_start, sim_end)
     return float(np.sum((yi - targets) ** 2))
 
 
@@ -202,13 +200,13 @@ if __name__ == '__main__':
     observable_species = rr_init.model.getFloatingSpeciesIds() # get the observable species
     print(f"Species to optimize: {observable_species}") 
 
-    params_to_tune = ["K_in", "K_out", "lambda_1"] # parameters to tune
+    params_to_tune = ["log_K_in", "log_K_out", "log_lambda_1"]
     print(f"Parameters to tune: {params_to_tune}")
 
     species_ids, target_values = load_targets('./test.csv') # load the targets
 
     init_log_params = np.random.uniform(-6, 6, size=len(params_to_tune))
-    print(f"Initial raw values: {10**init_log_params}")
+    print(f"Initial log values: {init_log_params}")
 
     print("\n--- Starting OpenAI-ES Optimization ---")
 
