@@ -10,7 +10,7 @@ rr = roadrunner.RoadRunner(os.path.join(_here, "working_homo-sapiens", "R-HSA-18
 #working_rr = roadrunner.RoadRunner(os.path.join(_here, "working_examples", "00001-sbml-l3v1.xml"))
 
 # simulate from 0 to 10 time units with 100 output rows
-result = rr.simulate(0,10,100)
+result = rr.simulate(0,10000,100)
 #result2 = working_rr.simulate(0, 10, 100)
 
 # plot primo modello

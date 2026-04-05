@@ -57,37 +57,37 @@ def simulate_terminal_means(
     rr: roadrunner.RoadRunner,
     species_ids: list[str],
     start: float,
-    end: float,
-    points: int,
-    tail_fraction: float = 0.2,
+    end: float
 ) -> np.ndarray:
     # Run a time-course simulation and compute y_i as the mean over the final part of the trajectory.
     selections = ["time", *species_ids]  # Ask RoadRunner to return time plus the chosen species columns.
     rr.reset()  # Reset dynamic state/time to initial conditions while keeping current parameter values.
+
+    points = 2 # we only need start and end points
     result = rr.simulate(start, end, points, selections=selections)  # Simulate and collect a result matrix.
 
-    n_rows = result.shape[0]  # Number of sampled time points returned by the simulator.
-    tail_start = max(0, int((1.0 - tail_fraction) * n_rows))  # Index where the "tail" segment begins.
-    tail_matrix = result[tail_start:, 1:]  # Slice tail rows and drop the time column.
-    return np.mean(tail_matrix, axis=0)  # Mean across time for each species -> vector y.
+    # result[-1] is the last row (the final time point)
+    # [1:] skips the 'time' column to get only species values
+    return result[-1, 1:]
 
 
 def objective_function(
+    rr,
     log_params: np.ndarray,
     parameter_ids: list[str],
     species_ids: list[str],
     targets: np.ndarray,
     sim_start: float,
-    sim_end: float,
-    sim_points: int,
+    sim_end: float
 ) -> float:
     # Compute the least-squares objective: F(theta) = sum_i (y_i(theta) - M_i)^2.
     # Here theta is represented in log-space; we exponentiate to enforce positivity of model parameters.
-    rr = roadrunner.RoadRunner(_SBML_PATH)  # Build a fresh simulator instance from the SBML file.
     params = np.exp(log_params)  # Map log-parameters back to strictly-positive parameters.
     for pid, value in zip(parameter_ids, params):  # Assign each parameter value to the RoadRunner model.
         rr[pid] = float(value) 
-    yi = simulate_terminal_means(rr, species_ids, sim_start, sim_end, sim_points)  # Simulate to get y_i.
+
+    rr.reset()
+    yi = simulate_terminal_means(rr, species_ids, sim_start, sim_end)  # Simulate to get y_i.
     return float(np.sum((yi - targets) ** 2))
 
 
@@ -98,7 +98,6 @@ def openai_es_minimize(
     targets: np.ndarray,
     sim_start: float,
     sim_end: float,
-    sim_points: int,
     iterations: int = 60,
     population_size: int = 20,
     sigma: float = 0.10,
@@ -119,15 +118,17 @@ def openai_es_minimize(
     history = [] 
     half = population_size // 2  # We sample half and mirror to get population_size evaluations.
 
+    rr = roadrunner.RoadRunner(_SBML_PATH)  # Build a fresh simulator instance from the SBML file.
+
     best_theta = theta.copy()  # Track best-seen theta (in log-space) over the whole run.
     best_f = objective_function(  # Evaluate the objective at the initial candidate.
+        rr,
         best_theta, 
         parameter_ids, 
         species_ids,
         targets, 
         sim_start,
         sim_end, 
-        sim_points,
     ) 
 
     for step in range(iterations):
@@ -141,22 +142,22 @@ def openai_es_minimize(
             theta_minus = theta - sigma * e  # Negative (mirrored) perturbation in log-parameter space.
 
             f_plus = objective_function( 
+                rr,
                 theta_plus,  
                 parameter_ids,  
                 species_ids,  
                 targets,  
                 sim_start,  
-                sim_end,  
-                sim_points,  
+                sim_end
             )  
             f_minus = objective_function(  
+                rr,
                 theta_minus,  
                 parameter_ids,  
                 species_ids, 
                 targets,  
                 sim_start,  
-                sim_end,  
-                sim_points, 
+                sim_end
             )  
 
             score_plus = -f_plus  # Convert minimization into maximization score for ES update.
@@ -176,13 +177,13 @@ def openai_es_minimize(
         theta = theta + learning_rate * grad_estimate  # Update theta in direction that increases score.
 
         current_f = objective_function(  
+            rr,
             theta,  
             parameter_ids,  
             species_ids, 
             targets, 
             sim_start,
-            sim_end, 
-            sim_points,  
+            sim_end  
         )  
         history.append(current_f)  
 
@@ -217,9 +218,10 @@ if __name__ == '__main__':
         parameter_ids=params_to_tune,
         species_ids=species_ids,
         targets=target_values,
+        learning_rate=0.01,
         sim_start=0.0,
-        sim_end=50.0,  
-        sim_points=100
+        sim_end=1000.0,  
+        iterations=1000
     )
 
     print("\n--- Optimization Complete ---")

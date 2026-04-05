@@ -265,48 +265,6 @@
     <!-- Points 3 & 4: Rate rules for auxiliary ODE variables -->
     <listOfRules>
 
-      <!-- Point 3: Max-tracking for nucleoplasm IP6
-           der(z_2023929) = 0  if species_2023929 <= M
-                          = 10 otherwise
-           z_2023929(0) = 0
-           At horizon H: z_2023929(H) > 0 iff species_2023929 exceeded M at some point. -->
-      <rateRule variable="z_2023929">
-        <math xmlns="http://www.w3.org/1998/math/MathML">
-          <piecewise>
-            <piece>
-              <cn> 0 </cn>
-              <apply>
-                <leq/>
-                <ci> species_2023929 </ci>
-                <ci> M </ci>
-              </apply>
-            </piece>
-            <otherwise>
-              <cn> 10 </cn>
-            </otherwise>
-          </piecewise>
-        </math>
-      </rateRule>
-
-      <!-- Point 3: Max-tracking for ER lumen IP6 -->
-      <rateRule variable="z_2024018">
-        <math xmlns="http://www.w3.org/1998/math/MathML">
-          <piecewise>
-            <piece>
-              <cn> 0 </cn>
-              <apply>
-                <leq/>
-                <ci> species_2024018 </ci>
-                <ci> M </ci>
-              </apply>
-            </piece>
-            <otherwise>
-              <cn> 10 </cn>
-            </otherwise>
-          </piecewise>
-        </math>
-      </rateRule>
-
       <!-- Point 4: Running mean of nucleoplasm IP6
            der(y_2023929) = (species_2023929 - y_2023929) / (time + epsilon)
            => y_2023929(t) = (1/t) * integral_0^t species_2023929(tau) dtau -->
