@@ -1,5 +1,102 @@
 # reactome-sim
 
-Folders
-- `./working_examples` contains general templates that can perform a meaningful `libroadrunner` simulation.
-- `./working_homo-sapiens` contains former `homo_sapiens` pathways that have been updated for dynamic simulation. Now they include global parameters, kinetic laws, dummy reactions, constraint, etc.
+This repository builds a simple workflow for SBML pathway simulation and parameter fitting with `libRoadRunner`.
+
+## Project Workflow
+
+1. Start from an SBML model in `working_homo-sapiens/`.
+2. Generate target values for all model species with `generate_target_file.py`.
+3. Run optimization with `roadrunner_new.py` to fit selected model parameters against target values.
+4. (Optional) Save optimized parameter values back into the SBML file.
+
+## Repository Structure
+
+- `working_examples/`: Generic SBML templates for testing and experimentation.
+- `working_homo-sapiens/`: Pathway SBML models prepared for dynamic simulation.
+- `generated_target/`: Auto-generated prompts and CSV targets (created by `generate_target_file.py`).
+- `generate_target_file.py`: Parses SBML, builds a prompt, calls Gemini, and writes a target CSV.
+- `roadrunner_new.py`: Runs OpenAI-ES style optimization with RoadRunner against target values.
+- `test.csv`: Example target file used by `roadrunner_new.py` in its current configuration.
+
+## Requirements
+
+- Python 3.10+
+- Dependencies from `requirements.txt`
+- Gemini API key (for target generation)
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+## How To Run `generate_target_file.py`
+
+### 1) Set your Gemini API key
+
+PowerShell:
+
+```powershell
+$env:GEMINI_API_KEY = "YOUR_API_KEY"
+```
+
+### 2) Generate prompt + targets from SBML
+
+```bash
+python generate_target_file.py --sbml working_homo-sapiens/R-HSA-1855192.sbml
+```
+
+Default outputs:
+
+- `generated_target/R-HSA-1855192/prompt_R-HSA-1855192.txt`
+- `generated_target/R-HSA-1855192/target.csv`
+
+### Useful options
+
+- Dry run (no API call, prompt only):
+
+```bash
+python generate_target_file.py --sbml working_homo-sapiens/R-HSA-1855192.sbml --dry-run
+```
+
+- Custom output CSV:
+
+```bash
+python generate_target_file.py --sbml working_homo-sapiens/R-HSA-1855192.sbml --output-csv test.csv
+```
+
+## How To Run `roadrunner_new.py`
+
+`roadrunner_new.py` currently uses:
+
+- SBML model: `working_homo-sapiens/R-HSA-1855192.sbml`
+- Targets file: `./test.csv`
+- Tuned parameters: `log_K_in`, `log_K_out`, `log_lambda_1`
+
+Run:
+
+```bash
+python roadrunner_new.py
+```
+
+What it does:
+
+1. Loads target values from `test.csv`.
+2. Simulates the model with RoadRunner.
+3. Optimizes parameters with an OpenAI-ES loop.
+4. Plots optimization loss.
+5. Writes optimized parameter values back into the SBML file.
+
+## Practical End-to-End Example
+
+1. Generate a target file:
+
+```bash
+python generate_target_file.py --sbml working_homo-sapiens/R-HSA-1855192.sbml --output-csv test.csv
+```
+
+2. Fit model parameters against that target file:
+
+```bash
+python roadrunner_new.py
+```
