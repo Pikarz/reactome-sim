@@ -211,3 +211,4 @@ __marimo__/
 all_species.*
 homo_sapiens.*
 note.md
+generated_target/
