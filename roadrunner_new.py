@@ -234,6 +234,7 @@ def write_optimized_params_to_sbml(sbml_path, param_map):
         tree.write(sbml_path, encoding='utf-8', xml_declaration=True)
         print(f"Successfully updated {updated_count} parameters to {sbml_path}")
     else:
+        ns = "{http://www.sbml.org/sbml/level3/version1/core}"
         found_ids = [p.get('id') for p in root.iter(f"{ns}parameter")]
         missing = [k for k in param_map.keys() if k not in found_ids]
         print(f"Error: Only found {updated_count}/{len(param_map)} parameters.")
