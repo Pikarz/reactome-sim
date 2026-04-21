@@ -110,6 +110,38 @@ def _make_unique_id(model: libsbml.Model, base_id: str) -> str:
     return candidate
 
 
+def _make_unique_metaid(model: libsbml.Model, base_metaid: str) -> str:
+    candidate = base_metaid
+    idx = 2
+    while model.getElementByMetaId(candidate) is not None:
+        candidate = f"{base_metaid}__{idx}"
+        idx += 1
+    return candidate
+
+
+def _ensure_unique_metaid_for_add(
+    model: libsbml.Model,
+    sbase: libsbml.SBase,
+) -> bool:
+    """Ensure imported element has a unique metaid in the merged model.
+
+    Returns True if the element metaid was changed.
+    """
+
+    if sbase is None or not sbase.isSetMetaId():
+        return False
+
+    metaid = sbase.getMetaId()
+    if not metaid:
+        return False
+
+    if model.getElementByMetaId(metaid) is None:
+        return False
+
+    sbase.setMetaId(_make_unique_metaid(model, metaid))
+    return True
+
+
 def _clone_document(doc: libsbml.SBMLDocument) -> libsbml.SBMLDocument:
     text = libsbml.writeSBMLToString(doc)
     clone = libsbml.readSBMLFromString(text)
@@ -328,11 +360,16 @@ def merge_compartments(
 
         if comp1 is None:
             # Compartment exists only in file2: copy it unchanged.
-            rc = merged_model.addCompartment(comp2.clone())
+            clone = comp2.clone()
+            metaid_changed = _ensure_unique_metaid_for_add(merged_model, clone)
+            rc = merged_model.addCompartment(clone)
             if rc != libsbml.LIBSBML_OPERATION_SUCCESS:
                 raise RuntimeError(f"Failed to add compartment {cid}, libSBML code={rc}")
             if tracker is not None:
-                tracker.file2_as_is.add(cid)
+                if metaid_changed:
+                    tracker.file2_modified.add(cid)
+                else:
+                    tracker.file2_as_is.add(cid)
             continue
 
         # Same id in both files: this is considered a merged entity.
@@ -392,6 +429,8 @@ def merge_species(
             # and guaranteeing an explicit initial value.
             clone = sp2.clone()
             changed = False
+            if _ensure_unique_metaid_for_add(merged_model, clone):
+                changed = True
             if comp2 and clone.isSetCompartment() and clone.getCompartment() != comp2:
                 clone.setCompartment(comp2)
                 changed = True
@@ -533,11 +572,16 @@ def merge_parameters(
         p1 = merged_model.getParameter(pid)
         if p1 is None:
             # Parameter exists only in file2: copy unchanged.
-            rc = merged_model.addParameter(p2.clone())
+            clone = p2.clone()
+            metaid_changed = _ensure_unique_metaid_for_add(merged_model, clone)
+            rc = merged_model.addParameter(clone)
             if rc != libsbml.LIBSBML_OPERATION_SUCCESS:
                 raise RuntimeError(f"Failed to add parameter {pid}, libSBML code={rc}")
             if tracker is not None:
-                tracker.file2_as_is.add(pid)
+                if metaid_changed:
+                    tracker.file2_modified.add(pid)
+                else:
+                    tracker.file2_as_is.add(pid)
             continue
 
         # Same id in both files => merged parameter (file1-preferred on conflict).
@@ -608,6 +652,7 @@ def merge_reactions(
                         break
 
         clone = r2.clone()
+        metaid_changed = _ensure_unique_metaid_for_add(merged_model, clone)
         # Rewrite all symbol references to keep the merged graph consistent.
         _rename_species_references(clone, species_id_map)
 
@@ -633,7 +678,7 @@ def merge_reactions(
             if rc != libsbml.LIBSBML_OPERATION_SUCCESS:
                 raise RuntimeError(f"Failed to add reaction {rid}, libSBML code={rc}")
             if tracker is not None:
-                if ref_renamed:
+                if ref_renamed or metaid_changed:
                     tracker.file2_modified.add(rid)
                 else:
                     tracker.file2_as_is.add(rid)
@@ -706,7 +751,9 @@ def _merge_unit_definitions(
         uid = u2.getId()
         u1 = merged_model.getUnitDefinition(uid)
         if u1 is None:
-            rc = merged_model.addUnitDefinition(u2.clone())
+            clone = u2.clone()
+            _ensure_unique_metaid_for_add(merged_model, clone)
+            rc = merged_model.addUnitDefinition(clone)
             if rc != libsbml.LIBSBML_OPERATION_SUCCESS:
                 raise RuntimeError(
                     f"Failed to add unit definition {uid}, libSBML code={rc}"
@@ -734,7 +781,9 @@ def _merge_function_definitions(
         fid = f2.getId()
         f1 = merged_model.getFunctionDefinition(fid)
         if f1 is None:
-            rc = merged_model.addFunctionDefinition(f2.clone())
+            clone = f2.clone()
+            _ensure_unique_metaid_for_add(merged_model, clone)
+            rc = merged_model.addFunctionDefinition(clone)
             if rc != libsbml.LIBSBML_OPERATION_SUCCESS:
                 raise RuntimeError(
                     f"Failed to add function definition {fid}, libSBML code={rc}"
@@ -781,6 +830,7 @@ def _merge_rules(
         r1 = existing.get(key)
         if r1 is None:
             clone = r2.clone()
+            _ensure_unique_metaid_for_add(merged_model, clone)
             _rename_species_references(clone, species_id_map)
             rc = merged_model.addRule(clone)
             if rc != libsbml.LIBSBML_OPERATION_SUCCESS:
@@ -848,6 +898,7 @@ def _merge_events(
 
         if e1 is None:
             clone = e2.clone()
+            _ensure_unique_metaid_for_add(merged_model, clone)
             _rename_species_references(clone, species_id_map)
             rc = merged_model.addEvent(clone)
             if rc != libsbml.LIBSBML_OPERATION_SUCCESS:

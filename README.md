@@ -100,3 +100,31 @@ python generate_target_file.py --sbml working_homo-sapiens/R-HSA-1855192.sbml --
 ```bash
 python roadrunner_new.py
 ```
+
+## How To Run `merge_sbml.py`
+
+Use `merge_sbml.py` to merge two SBML pathway files into a single deterministic output model.
+
+### Basic usage
+
+```bash
+python merge_sbml.py working_homo-sapiens/R-HSA-1660537.sbml working_homo-sapiens/R-HSA-1660508.sbml -o working_homo-sapiens/merged_1660537_1660508.sbml
+```
+
+### What gets written
+
+- Merged SBML file at the path passed to `-o`.
+- Merge report JSON next to it with suffix `.merge_report.json`.
+
+For the example above, outputs are:
+
+- `working_homo-sapiens/merged_1660537_1660508.sbml`
+- `working_homo-sapiens/merged_1660537_1660508_merge_report.json`
+
+### Useful option
+
+- Suppress validation warnings:
+
+```bash
+python merge_sbml.py working_homo-sapiens/R-HSA-1660537.sbml working_homo-sapiens/R-HSA-1660508.sbml -o working_homo-sapiens/merged_1660537_1660508.sbml --suppress-validation-warnings
+```
