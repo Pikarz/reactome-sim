@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_SBML_PATH = os.path.join(_HERE, "working_homo-sapiens", "R-HSA-1855192.sbml")
-_OPTIMIZED_SBML_PATH = os.path.join(_HERE, "working_homo-sapiens", "R-HSA-1855192_optimized.sbml")
+_SBML_PATH = os.path.join(_HERE, "working_homo-sapiens", "R-HSA-1855192_augmented.sbml")
+_OPTIMIZED_SBML_PATH = os.path.join(_HERE, "working_homo-sapiens", "R-HSA-1855192_aug_optimized.sbml")
 
 
 def load_targets(path: str) -> Tuple[List[str], np.ndarray]:
@@ -252,6 +252,7 @@ if __name__ == '__main__':
     print(f"Parameters to tune: {params_to_tune}")
 
     species_ids, target_values = load_targets('./test.csv') # load the targets
+    print(target_values)
 
     init_log_params = np.random.uniform(-6, 6, size=len(params_to_tune))
     print(f"Initial log values: {init_log_params}")
@@ -266,7 +267,7 @@ if __name__ == '__main__':
         learning_rate=0.01,
         sim_start=0.0,
         sim_end=1000000,  
-        iterations=1000
+        iterations=2000
     )
 
     print("\n--- Optimization Complete ---")

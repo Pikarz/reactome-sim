@@ -1,0 +1,402 @@
+<?xml version='1.0' encoding='utf-8'?>
+<sbml xmlns="http://www.sbml.org/sbml/level3/version1/core" xmlns:bqbiol="http://biomodels.net/biology-qualifiers/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:ns7="http://www.w3.org/1998/Math/MathML" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:vCard="http://www.w3.org/2001/vcard-rdf/3.0#" xmlns:xhtml="http://www.w3.org/1999/xhtml" level="3" version="1">
+  <notes>
+    <annotation>
+      <xhtml:p>SBML generated from Reactome version 95 on 11/25/25, 4:14 AM using JSBML version 1.5.</xhtml:p>
+    </annotation>
+  </notes>
+  <model metaid="metaid_0" id="pathway_1855192" name="IPs transport between nucleus and ER lumen">
+    <notes>
+      <xhtml:p>Inositol phosphate IP6 is imported to the endoplasmic reticulum (ER) lumen from the nucleus (Caffrey et al. 1999). The molecular details of these transport processes remain uncertain.</xhtml:p>
+    </notes>
+    <annotation>
+      <rdf:RDF>
+        <rdf:Description rdf:about="#metaid_0">
+          <dc:creator>
+            <rdf:Bag>
+              <rdf:li rdf:parseType="Resource">
+                <vCard:N rdf:parseType="Resource">
+                  <vCard:Family>Williams</vCard:Family>
+                  <vCard:Given />
+                </vCard:N>
+              </rdf:li>
+              <rdf:li rdf:parseType="Resource">
+                <vCard:N rdf:parseType="Resource">
+                  <vCard:Family>Williams</vCard:Family>
+                  <vCard:Given />
+                </vCard:N>
+              </rdf:li>
+              <rdf:li rdf:parseType="Resource">
+                <vCard:N rdf:parseType="Resource">
+                  <vCard:Family>Matthews</vCard:Family>
+                  <vCard:Given>Lisa</vCard:Given>
+                </vCard:N>
+                <vCard:ORG rdf:parseType="Resource">
+                  <vCard:Orgname>NYU School of Medicine, Department of Biochemistry</vCard:Orgname>
+                </vCard:ORG>
+              </rdf:li>
+            </rdf:Bag>
+          </dc:creator>
+          <dcterms:created rdf:parseType="Resource">
+            <dcterms:W3CDTF>2011-10-28T19:50:55Z</dcterms:W3CDTF>
+          </dcterms:created>
+          <dcterms:modified rdf:parseType="Resource">
+            <dcterms:W3CDTF>2023-03-08T14:40:28Z</dcterms:W3CDTF>
+          </dcterms:modified>
+          <dcterms:modified rdf:parseType="Resource">
+            <dcterms:W3CDTF>2011-10-28T19:50:55Z</dcterms:W3CDTF>
+          </dcterms:modified>
+          <bqbiol:is>
+            <rdf:Bag>
+              <rdf:li rdf:resource="https://identifiers.org/reactome:R-HSA-1855192" />
+              <rdf:li rdf:resource="https://identifiers.org/GO:0033271" />
+            </rdf:Bag>
+          </bqbiol:is>
+          <bqbiol:isDescribedBy>
+            <rdf:Bag>
+              <rdf:li rdf:resource="https://identifiers.org/pubmed:9923613" />
+            </rdf:Bag>
+          </bqbiol:isDescribedBy>
+        </rdf:Description>
+      </rdf:RDF>
+    </annotation>
+    <listOfCompartments>
+      <compartment metaid="metaid_2" sboTerm="SBO:0000290" id="compartment_17957" name="endoplasmic reticulum lumen" constant="true">
+        <annotation>
+          <rdf:RDF>
+            <rdf:Description rdf:about="#metaid_2">
+              <bqbiol:is>
+                <rdf:Bag>
+                  <rdf:li rdf:resource="https://identifiers.org/GO:0005788" />
+                </rdf:Bag>
+              </bqbiol:is>
+            </rdf:Description>
+          </rdf:RDF>
+        </annotation>
+      </compartment>
+      <compartment metaid="metaid_4" sboTerm="SBO:0000290" id="compartment_7660" name="nucleoplasm" constant="true">
+        <annotation>
+          <rdf:RDF>
+            <rdf:Description rdf:about="#metaid_4">
+              <bqbiol:is>
+                <rdf:Bag>
+                  <rdf:li rdf:resource="https://identifiers.org/GO:0005654" />
+                </rdf:Bag>
+              </bqbiol:is>
+            </rdf:Description>
+          </rdf:RDF>
+        </annotation>
+      </compartment>
+    </listOfCompartments>
+    <listOfSpecies>
+      <species metaid="metaid_1" sboTerm="SBO:0000247" id="species_2024018" name="IP6 [endoplasmic reticulum lumen]" compartment="compartment_17957" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false">
+        <notes>
+          <xhtml:p>Derived from a Reactome SimpleEntity. This is a small compound</xhtml:p>
+        </notes>
+        <annotation>
+          <rdf:RDF>
+            <rdf:Description rdf:about="#metaid_1">
+              <bqbiol:is>
+                <rdf:Bag>
+                  <rdf:li rdf:resource="https://www.ebi.ac.uk/chebi/CHEBI:58130" />
+                  <rdf:li rdf:resource="https://identifiers.org/reactome:R-ALL-2024018" />
+                </rdf:Bag>
+              </bqbiol:is>
+            </rdf:Description>
+          </rdf:RDF>
+        </annotation>
+      </species>
+      <species metaid="metaid_3" sboTerm="SBO:0000247" id="species_2023929" name="IP6 [nucleoplasm]" compartment="compartment_7660" hasOnlySubstanceUnits="false" boundaryCondition="false" constant="false">
+        <notes>
+          <xhtml:p>Derived from a Reactome SimpleEntity. This is a small compound</xhtml:p>
+        </notes>
+        <annotation>
+          <rdf:RDF>
+            <rdf:Description rdf:about="#metaid_3">
+              <bqbiol:is>
+                <rdf:Bag>
+                  <rdf:li rdf:resource="https://www.ebi.ac.uk/chebi/CHEBI:58130" />
+                  <rdf:li rdf:resource="https://identifiers.org/reactome:R-ALL-2023929" />
+                </rdf:Bag>
+              </bqbiol:is>
+            </rdf:Description>
+          </rdf:RDF>
+        </annotation>
+      </species>
+    </listOfSpecies>
+    <listOfParameters>
+      <parameter id="Ku" value="10" constant="true" />
+      <parameter id="Ur" value="0.7" constant="true" />
+      <parameter id="lambda_1" value="3" constant="false" />
+      <parameter id="epsilon" value="1e-06" constant="true" />
+      <parameter id="M" value="1" constant="true" />
+      <parameter id="K_in" value="1" constant="false" />
+      <parameter id="K_out" value="3.16" constant="false" />
+      <parameter id="log_K_in" value="3.9793079823067585" constant="false" />
+      <parameter id="log_K_out" value="3.979353448834829" constant="false" />
+      <parameter id="log_lambda_1" value="4.281240867684302" constant="false" />
+      <parameter id="mu_2024018" value="0.5" constant="true" />
+      <parameter id="y_2024018" value="0" constant="false" />
+      <parameter id="y2_2024018" value="0" constant="false" />
+      <parameter id="mu_2023929" value="0.5" constant="true" />
+      <parameter id="y_2023929" value="0" constant="false" />
+      <parameter id="y2_2023929" value="0" constant="false" />
+    </listOfParameters>
+    <listOfRules>
+      <assignmentRule variable="K_in">
+        <ns7:math>
+          <ns7:apply>
+            <ns7:power />
+            <ns7:cn type="integer"> 10 </ns7:cn>
+            <ns7:ci> log_K_in </ns7:ci>
+          </ns7:apply>
+        </ns7:math>
+      </assignmentRule>
+      <assignmentRule variable="K_out">
+        <ns7:math>
+          <ns7:apply>
+            <ns7:power />
+            <ns7:cn type="integer"> 10 </ns7:cn>
+            <ns7:ci> log_K_out </ns7:ci>
+          </ns7:apply>
+        </ns7:math>
+      </assignmentRule>
+      <assignmentRule variable="lambda_1">
+        <ns7:math>
+          <ns7:apply>
+            <ns7:power />
+            <ns7:cn type="integer"> 10 </ns7:cn>
+            <ns7:ci> log_lambda_1 </ns7:ci>
+          </ns7:apply>
+        </ns7:math>
+      </assignmentRule>
+      <rateRule variable="y_2024018">
+        <ns7:math>
+          <ns7:apply>
+            <ns7:divide />
+            <ns7:apply>
+              <ns7:minus />
+              <ns7:ci> species_2024018 </ns7:ci>
+              <ns7:ci> y_2024018 </ns7:ci>
+            </ns7:apply>
+            <ns7:apply>
+              <ns7:plus />
+              <ns7:csymbol encoding="text" definitionURL="http://www.sbml.org/sbml/symbols/time"> time </ns7:csymbol>
+              <ns7:ci> epsilon </ns7:ci>
+            </ns7:apply>
+          </ns7:apply>
+        </ns7:math>
+      </rateRule>
+      <rateRule variable="y2_2024018">
+        <ns7:math>
+          <ns7:apply>
+            <ns7:divide />
+            <ns7:apply>
+              <ns7:minus />
+              <ns7:apply>
+                <ns7:power />
+                <ns7:ci> species_2024018 </ns7:ci>
+                <ns7:cn type="integer"> 2 </ns7:cn>
+              </ns7:apply>
+              <ns7:ci> y2_2024018 </ns7:ci>
+            </ns7:apply>
+            <ns7:apply>
+              <ns7:plus />
+              <ns7:csymbol encoding="text" definitionURL="http://www.sbml.org/sbml/symbols/time"> time </ns7:csymbol>
+              <ns7:ci> epsilon </ns7:ci>
+            </ns7:apply>
+          </ns7:apply>
+        </ns7:math>
+      </rateRule>
+      <rateRule variable="y_2023929">
+        <ns7:math>
+          <ns7:apply>
+            <ns7:divide />
+            <ns7:apply>
+              <ns7:minus />
+              <ns7:ci> species_2023929 </ns7:ci>
+              <ns7:ci> y_2023929 </ns7:ci>
+            </ns7:apply>
+            <ns7:apply>
+              <ns7:plus />
+              <ns7:csymbol encoding="text" definitionURL="http://www.sbml.org/sbml/symbols/time"> time </ns7:csymbol>
+              <ns7:ci> epsilon </ns7:ci>
+            </ns7:apply>
+          </ns7:apply>
+        </ns7:math>
+      </rateRule>
+      <rateRule variable="y2_2023929">
+        <ns7:math>
+          <ns7:apply>
+            <ns7:divide />
+            <ns7:apply>
+              <ns7:minus />
+              <ns7:apply>
+                <ns7:power />
+                <ns7:ci> species_2023929 </ns7:ci>
+                <ns7:cn type="integer"> 2 </ns7:cn>
+              </ns7:apply>
+              <ns7:ci> y2_2023929 </ns7:ci>
+            </ns7:apply>
+            <ns7:apply>
+              <ns7:plus />
+              <ns7:csymbol encoding="text" definitionURL="http://www.sbml.org/sbml/symbols/time"> time </ns7:csymbol>
+              <ns7:ci> epsilon </ns7:ci>
+            </ns7:apply>
+          </ns7:apply>
+        </ns7:math>
+      </rateRule>
+    </listOfRules>
+    <listOfConstraints>
+      <constraint>
+        <ns7:math>
+          <ns7:apply>
+            <ns7:leq />
+            <ns7:apply>
+              <ns7:abs />
+              <ns7:apply>
+                <ns7:minus />
+                <ns7:ci> y_2024018 </ns7:ci>
+                <ns7:ci> mu_2024018 </ns7:ci>
+              </ns7:apply>
+            </ns7:apply>
+            <ns7:cn type="e-notation"> 1 <ns7:sep /> -3 </ns7:cn>
+          </ns7:apply>
+        </ns7:math>
+        <message>
+          <xhtml:p>Mean of species_2024018 must match mu_2024018</xhtml:p>
+        </message>
+      </constraint>
+      <constraint>
+        <ns7:math>
+          <ns7:apply>
+            <ns7:leq />
+            <ns7:apply>
+              <ns7:abs />
+              <ns7:apply>
+                <ns7:minus />
+                <ns7:ci> y_2023929 </ns7:ci>
+                <ns7:ci> mu_2023929 </ns7:ci>
+              </ns7:apply>
+            </ns7:apply>
+            <ns7:cn type="e-notation"> 1 <ns7:sep /> -3 </ns7:cn>
+          </ns7:apply>
+        </ns7:math>
+        <message>
+          <xhtml:p>Mean of species_2023929 must match mu_2023929</xhtml:p>
+        </message>
+      </constraint>
+    </listOfConstraints>
+    <listOfReactions>
+      <reaction metaid="metaid_5" id="reaction_1855187" name="IP6 transports from the nucleus to the ER lumen" reversible="false" fast="false" compartment="compartment_7660">
+        <notes>
+          <xhtml:p>Inositol 1,2,3,4,5,6-hexakisphosphate (IP6) translocates from the nucleus to the endoplasmic reticulum (ER) lumen (Caffrey et al. 1999).</xhtml:p>
+        </notes>
+        <annotation>
+          <rdf:RDF>
+            <rdf:Description rdf:about="#metaid_5">
+              <dc:creator>
+                <rdf:Bag>
+                  <rdf:li rdf:parseType="Resource">
+                    <vCard:N rdf:parseType="Resource">
+                      <vCard:Family>Williams</vCard:Family>
+                      <vCard:Given />
+                    </vCard:N>
+                  </rdf:li>
+                  <rdf:li rdf:parseType="Resource">
+                    <vCard:N rdf:parseType="Resource">
+                      <vCard:Family>Williams</vCard:Family>
+                      <vCard:Given />
+                    </vCard:N>
+                  </rdf:li>
+                  <rdf:li rdf:parseType="Resource">
+                    <vCard:N rdf:parseType="Resource">
+                      <vCard:Family>D'Eustachio</vCard:Family>
+                      <vCard:Given>Peter</vCard:Given>
+                    </vCard:N>
+                    <vCard:ORG rdf:parseType="Resource">
+                      <vCard:Orgname>NYU School of Medicine, Department of Biochemistry</vCard:Orgname>
+                    </vCard:ORG>
+                  </rdf:li>
+                </rdf:Bag>
+              </dc:creator>
+              <dcterms:created rdf:parseType="Resource">
+                <dcterms:W3CDTF>2011-10-28T19:50:55Z</dcterms:W3CDTF>
+              </dcterms:created>
+              <dcterms:modified rdf:parseType="Resource">
+                <dcterms:W3CDTF>2025-06-06T21:15:39Z</dcterms:W3CDTF>
+              </dcterms:modified>
+              <dcterms:modified rdf:parseType="Resource">
+                <dcterms:W3CDTF>2011-10-28T19:50:55Z</dcterms:W3CDTF>
+              </dcterms:modified>
+              <bqbiol:is>
+                <rdf:Bag>
+                  <rdf:li rdf:resource="https://identifiers.org/reactome:R-HSA-1855187" />
+                  <rdf:li rdf:resource="https://identifiers.org/GO:0051169" />
+                </rdf:Bag>
+              </bqbiol:is>
+              <bqbiol:isDescribedBy>
+                <rdf:Bag>
+                  <rdf:li rdf:resource="https://identifiers.org/pubmed:9923613" />
+                </rdf:Bag>
+              </bqbiol:isDescribedBy>
+              <bqbiol:is>
+                <rdf:Bag>
+                  <rdf:li rdf:resource="https://identifiers.org/reactome:R-HSA-1855187" />
+                </rdf:Bag>
+              </bqbiol:is>
+              <bqbiol:is>
+                <rdf:Bag>
+                  <rdf:li rdf:resource="https://identifiers.org/GO:0051169" />
+                </rdf:Bag>
+              </bqbiol:is>
+            </rdf:Description>
+          </rdf:RDF>
+        </annotation>
+        <listOfReactants>
+          <speciesReference sboTerm="SBO:0000010" id="speciesreference_1855187_input_2023929" species="species_2023929" stoichiometry="1" constant="true" />
+        </listOfReactants>
+        <listOfProducts>
+          <speciesReference sboTerm="SBO:0000011" id="speciesreference_1855187_output_2024018" species="species_2024018" stoichiometry="1" constant="true" />
+        </listOfProducts>
+        <kineticLaw>
+          <ns7:math>
+            <ns7:apply>
+              <ns7:times />
+              <ns7:ci> lambda_1 </ns7:ci>
+              <ns7:apply>
+                <ns7:power />
+                <ns7:ci> species_2023929 </ns7:ci>
+                <ns7:cn type="integer"> 1 </ns7:cn>
+              </ns7:apply>
+            </ns7:apply>
+          </ns7:math>
+        </kineticLaw>
+      </reaction>
+      <reaction id="reaction_output_degradation" reversible="false" fast="false" compartment="compartment_17957">
+        <listOfReactants>
+          <speciesReference species="species_2024018" stoichiometry="1" constant="true" />
+        </listOfReactants>
+        <kineticLaw>
+          <ns7:math>
+            <ns7:apply>
+              <ns7:times />
+              <ns7:ci> K_out </ns7:ci>
+              <ns7:ci> species_2024018 </ns7:ci>
+            </ns7:apply>
+          </ns7:math>
+        </kineticLaw>
+      </reaction>
+      <reaction id="reaction_input" reversible="false" fast="false" compartment="compartment_7660">
+        <listOfProducts>
+          <speciesReference species="species_2023929" stoichiometry="1" constant="true" />
+        </listOfProducts>
+        <kineticLaw>
+          <ns7:math>
+            <ns7:ci> K_in </ns7:ci>
+          </ns7:math>
+        </kineticLaw>
+      </reaction>
+    </listOfReactions>
+  </model>
+</sbml>
