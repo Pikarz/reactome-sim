@@ -5,7 +5,7 @@ This repository builds a simple workflow for SBML pathway simulation and paramet
 ## Project Workflow
 
 1. Start from an SBML model in `working_homo-sapiens/`.
-2. Generate target values for all model species with `generate_target_file.py`.
+2. Generate target values for all model species with `generate_target_file.py` via local Ollama.
 3. Run optimization with `roadrunner_new.py` to fit selected model parameters against target values.
 4. (Optional) Save optimized parameter values back into the SBML file.
 
@@ -14,7 +14,7 @@ This repository builds a simple workflow for SBML pathway simulation and paramet
 - `working_examples/`: Generic SBML templates for testing and experimentation.
 - `working_homo-sapiens/`: Pathway SBML models prepared for dynamic simulation.
 - `generated_target/`: Auto-generated prompts and CSV targets (created by `generate_target_file.py`).
-- `generate_target_file.py`: Parses SBML, builds a prompt, calls Gemini, and writes a target CSV.
+- `generate_target_file.py`: Parses SBML, builds a prompt, calls local Ollama, and writes a target CSV.
 - `roadrunner_new.py`: Runs OpenAI-ES style optimization with RoadRunner against target values.
 - `test.csv`: Example target file used by `roadrunner_new.py` in its current configuration.
 
@@ -22,7 +22,8 @@ This repository builds a simple workflow for SBML pathway simulation and paramet
 
 - Python 3.10+
 - Dependencies from `requirements.txt`
-- Gemini API key (for target generation)
+- Ollama installed locally
+- A pulled Ollama model (default in script: `llama3.2:3b`)
 
 Install dependencies:
 
@@ -30,14 +31,82 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-## How To Run `generate_target_file.py`
+## Install and Run Ollama (Windows)
 
-### 1) Set your Gemini API key
+### 1) Install Ollama
 
-PowerShell:
+Preferred (winget):
 
 ```powershell
-$env:GEMINI_API_KEY = "YOUR_API_KEY"
+winget install --id Ollama.Ollama -e --accept-package-agreements --accept-source-agreements
+```
+
+If `winget` is unavailable, install from: https://ollama.com/download/windows
+
+### 2) Open a new PowerShell and verify CLI
+
+```powershell
+ollama --version
+```
+
+If you get `ollama non riconosciuto`, use the full path:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" --version
+```
+
+### 3) Start the Ollama server
+
+```powershell
+ollama serve
+```
+
+If `ollama` is not in PATH, use:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" serve
+```
+
+Keep this terminal open while generating targets.
+
+If you see `bind ... 11434`, it means the server is already running (this is okay).
+
+### 4) Pull the model
+
+In a second terminal:
+
+```powershell
+ollama pull llama3.2:3b
+```
+
+PATH fallback:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" pull llama3.2:3b
+```
+
+### 5) Verify server and models
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:11434/api/tags
+```
+
+You should see your downloaded model in the JSON response.
+
+## How To Run `generate_target_file.py`
+
+### 1) Ensure Ollama server is running and model is pulled
+
+Server:
+
+```powershell
+ollama serve
+```
+
+Model:
+
+```powershell
+ollama pull llama3.2:3b
 ```
 
 ### 2) Generate prompt + targets from SBML
@@ -52,6 +121,12 @@ Default outputs:
 - `generated_target/R-HSA-1855192/target.csv`
 
 ### Useful options
+
+- Choose a specific Ollama model:
+
+```bash
+python generate_target_file.py --sbml working_homo-sapiens/R-HSA-1855192.sbml --model llama3.2:3b
+```
 
 - Dry run (no API call, prompt only):
 

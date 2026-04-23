@@ -3,13 +3,11 @@
 import argparse
 import csv
 import json
-import os
 from pathlib import Path
 import re
 import sys
 import textwrap
 import urllib.error
-import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
@@ -274,48 +272,44 @@ Full SBML context:
     return textwrap.dedent(prompt).strip()
 
 
-def call_gemini(prompt: str, api_key: str, model: str, temperature: float) -> str:
+def call_ollama(prompt: str, model: str, temperature: float) -> str:
     payload = {
-        "generationConfig": {
-            "temperature": temperature,
-            "responseMimeType": "application/json",
-        },
-        "contents": [{"parts": [{"text": prompt}]}],
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "format": "json",
+        "options": {"temperature": temperature},
     }
 
-    endpoint = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{urllib.parse.quote(model)}:generateContent?key={urllib.parse.quote(api_key)}"
-    )
-
     request = urllib.request.Request(
-        endpoint,
+        "http://localhost:11434/api/chat",
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with urllib.request.urlopen(request, timeout=300) as response:
             body = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Gemini HTTP error {exc.code}: {error_body}") from exc
+        raise RuntimeError(f"Ollama HTTP error {exc.code}: {error_body}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"Network error while calling Gemini API: {exc.reason}") from exc
+        raise RuntimeError(
+            "Network error while calling Ollama. Ensure Ollama is running on localhost:11434 "
+            f"and the model is available (ollama pull {model}): {exc.reason}"
+        ) from exc
+    except Exception as exc:
+        raise RuntimeError(
+            "Error while calling Ollama. Ensure Ollama is running and the model is available "
+            f"(ollama pull {model})."
+        ) from exc
 
     parsed = json.loads(body)
-    candidates = parsed.get("candidates", [])
-    if not candidates:
-        raise RuntimeError(f"Unexpected Gemini response (no candidates): {body}")
+    text = str(parsed.get("message", {}).get("content", ""))
 
-    parts = candidates[0].get("content", {}).get("parts", [])
-    if not parts:
-        raise RuntimeError(f"Unexpected Gemini response (no parts): {body}")
-
-    text = "".join(part.get("text", "") for part in parts)
     if not text.strip():
-        raise RuntimeError(f"Empty Gemini response: {body}")
+        raise RuntimeError(f"Empty Ollama response: {body}")
 
     return text
 
@@ -399,7 +393,7 @@ def resolve_output_paths(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate a CSV file with average species targets from an SBML file using Gemini API."
+        description="Generate a CSV file with average species targets from an SBML file using Ollama."
     )
     parser.add_argument("--sbml", required=True, help="Path to the .sbml file")
     parser.add_argument(
@@ -409,13 +403,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--model",
-        default="gemini-2.5-flash",
-        help="Gemini model name (e.g., gemini-2.5-pro, gemini-1.5-pro)",
-    )
-    parser.add_argument(
-        "--api-key",
-        default=os.getenv("GEMINI_API_KEY", ""),
-        help="Gemini API key. If omitted, uses GEMINI_API_KEY environment variable.",
+        default="llama3.2:3b",
+        help="Ollama model name (e.g., llama3.2:3b, gemma2:2b, mistral:7b)",
     )
     parser.add_argument("--temperature", type=float, default=0.2, help="Generation temperature")
     parser.add_argument(
@@ -426,7 +415,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Does not call Gemini API; generates only the prompt and exits.",
+        help="Does not call Ollama; generates only the prompt and exits.",
     )
     return parser.parse_args()
 
@@ -451,14 +440,8 @@ def main() -> int:
         print(f"Prompt saved to: {prompt_output_path}")
         return 0
 
-    if not args.api_key:
-        raise ValueError(
-            "Missing Gemini API key. Use --api-key or set GEMINI_API_KEY."
-        )
-
-    model_response_text = call_gemini(
+    model_response_text = call_ollama(
         prompt=prompt,
-        api_key=args.api_key,
         model=args.model,
         temperature=args.temperature,
     )
