@@ -214,3 +214,6 @@ note.md
 generated_target/
 bench_out/
 working_homo-sapiens/
+
+report/
+bench_out_*

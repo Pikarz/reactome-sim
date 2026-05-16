@@ -87,7 +87,14 @@ def objective_function(
     for pid, value in zip(parameter_ids, log_params):  # Assign each parameter value to the RoadRunner model.
         rr[pid] = float(value) 
 
-    yi = simulate_terminal_means(rr, species_ids, sim_start, sim_end)
+    try:
+        yi = simulate_terminal_means(rr, species_ids, sim_start, sim_end)
+    except RuntimeError:
+        # Se CVODE fallisce a causa della rigidezza estrema, applichiamo una penalità altissima (1e12).
+        # Usiamo un numero finito e non float('inf') per non generare NaN quando ES calcola medie/std.
+        return 1e12
+    # --- FINE MODIFICA ---
+
     denom = np.where(np.abs(targets) > 1e-6, np.abs(targets), 1.0)
     return float(np.sum(((yi - targets) / denom) ** 2))
 

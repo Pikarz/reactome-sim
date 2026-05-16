@@ -31,16 +31,16 @@ import pipeline
 # Hardcoded scaling scenarios. Each pair was checked for ≥1 shared species so the
 # merge step is non-trivial. Ordered by combined input size (ascending).
 SCENARIOS = [
+    #{
+    #    "name": "small",
+    #    "file1": "working_homo-sapiens/R-HSA-1660508.sbml",
+    #    "file2": "working_homo-sapiens/R-HSA-1660537.sbml",
+    #},
     {
-        "name": "small",
-        "file1": "working_homo-sapiens/R-HSA-1660508.sbml",
-        "file2": "working_homo-sapiens/R-HSA-1660537.sbml",
+         "name": "medium",
+         "file1": "working_homo-sapiens/R-HSA-1059683.sbml",
+         "file2": "working_homo-sapiens/R-HSA-109703.sbml",
     },
-    # {
-    #     "name": "medium",
-    #     "file1": "homo_sapiens.3.1.sbml/R-HSA-1059683.sbml",
-    #     "file2": "homo_sapiens.3.1.sbml/R-HSA-109703.sbml",
-    # },
     # {
     #     "name": "large",
     #     "file1": "homo_sapiens.3.1.sbml/R-HSA-109581.sbml",
@@ -94,23 +94,22 @@ def _read_rss_bytes() -> int:
     except Exception:
         return 0
 
-
 class _RssSampler(threading.Thread):
     def __init__(self, interval_s: float = 0.02):
         super().__init__(daemon=True)
         self.interval = interval_s
         self.peak = _read_rss_bytes()
-        self._stop = threading.Event()
+        self._stop_event = threading.Event() 
 
     def run(self):
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             rss = _read_rss_bytes()
             if rss > self.peak:
                 self.peak = rss
-            self._stop.wait(self.interval)
+            self._stop_event.wait(self.interval)
 
     def stop(self):
-        self._stop.set()
+        self._stop_event.set()
         self.join()
 
 
@@ -391,7 +390,7 @@ def run_scenario(sc: dict, args, out_root: Path) -> ScenarioResult:
 # Reporting -------------------------------------------------------------------
 
 def write_csv_report(results: list[ScenarioResult], out_path: Path) -> None:
-    with open(out_path, "w", newline="") as h:
+    with open(out_path, "w", newline="", encoding="utf-8") as h:
         w = csv.writer(h)
         w.writerow(
             ["scenario", "stage", "wall_s", "cpu_s", "peak_rss_mb", "ok", "detail"]
@@ -449,7 +448,7 @@ def write_markdown_summary(results: list[ScenarioResult], out_path: Path) -> Non
             lines.append(f"| {s.name} | {'PASS' if s.ok else 'FAIL'} | {s.detail} |")
         lines.append("")
 
-    out_path.write_text("\n".join(lines))
+    out_path.write_text("\n".join(lines), encoding="utf-8")
 
 
 # Plots -----------------------------------------------------------------------
