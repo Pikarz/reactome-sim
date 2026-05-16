@@ -88,7 +88,8 @@ def objective_function(
         rr[pid] = float(value) 
 
     yi = simulate_terminal_means(rr, species_ids, sim_start, sim_end)
-    return float(np.sum((yi - targets) ** 2))
+    denom = np.where(np.abs(targets) > 1e-6, np.abs(targets), 1.0)
+    return float(np.sum(((yi - targets) / denom) ** 2))
 
 
 def openai_es_minimize(

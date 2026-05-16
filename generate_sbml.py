@@ -172,8 +172,8 @@ def _species_initial_value(species: libsbml.Species, fallback: float) -> float:
 
 
 def _add_source_reaction(model: libsbml.Model, species: libsbml.Species, k_id: str) -> None:
-    # Fixed ID used by the template for a synthetic source reaction.
-    rid = "reaction_input"
+    # Per-species ID so every disconnected species gets its own source reaction.
+    rid = f"reaction_input_{_species_token(species.getId())}"
 
     # If already present, keep existing reaction untouched.
     if model.getReaction(rid) is not None:
@@ -201,8 +201,8 @@ def _add_source_reaction(model: libsbml.Model, species: libsbml.Species, k_id: s
 
 
 def _add_sink_reaction(model: libsbml.Model, species: libsbml.Species, k_id: str) -> None:
-    # Fixed ID used by the template for a synthetic first-order degradation reaction.
-    rid = "reaction_output_degradation"
+    # Per-species ID so every disconnected species gets its own sink reaction.
+    rid = f"reaction_output_degradation_{_species_token(species.getId())}"
 
     # If already present, keep existing reaction untouched.
     if model.getReaction(rid) is not None:
@@ -345,13 +345,14 @@ def _read_sbml_with_namespace_fix(input_path: Path) -> libsbml.SBMLDocument:
     return libsbml.readSBMLFromString(text)
 
 
-def augment_model(model: libsbml.Model, default_mean: float, epsilon: float, threshold_m: float, k_default: float) -> dict[str, int]:
+def augment_model(model: libsbml.Model, default_mean: float, epsilon: float, threshold_m: float, k_default: float) -> dict:
     # Keep summary metrics for CLI output and quick sanity checks.
     stats = {
         "kinetic_laws_added": 0,
         "source_reactions_added": 0,
         "sink_reactions_added": 0,
         "constraints_added": 0,
+        "tunable_params": [],
     }
 
     # Step 1: ensure every reaction has a kinetic law.
@@ -364,24 +365,6 @@ def augment_model(model: libsbml.Model, default_mean: float, epsilon: float, thr
     _get_or_create_parameter(model, "epsilon", epsilon, True)
     _get_or_create_parameter(model, "M", threshold_m, True)
 
-    # Step 4: create core tunable parameters (non-constant so optimizers can fit them).
-    p_kin = _get_or_create_parameter(model, "K_in", 1.0, False)
-    p_kout = _get_or_create_parameter(model, "K_out", 3.16, False)
-    p_lam = _get_or_create_parameter(model, "lambda_1", 3.0, False)
-
-    # Step 5: expose log-space versions to improve optimization stability and positivity.
-    default_log_kin = math.log10(max(p_kin.getValue(), 1e-12))
-    default_log_kout = math.log10(max(p_kout.getValue(), 1e-12))
-    default_log_lam = math.log10(max(p_lam.getValue(), 1e-12))
-    _get_or_create_parameter(model, "log_K_in", default_log_kin, False)
-    _get_or_create_parameter(model, "log_K_out", default_log_kout, False)
-    _get_or_create_parameter(model, "log_lambda_1", default_log_lam, False)
-
-    # Step 6: tie linear-space parameters to log-space parameters through assignment rules.
-    _get_or_create_assignment_rule(model, "K_in", "pow(10, log_K_in)")
-    _get_or_create_assignment_rule(model, "K_out", "pow(10, log_K_out)")
-    _get_or_create_assignment_rule(model, "lambda_1", "pow(10, log_lambda_1)")
-
     # Build producer/consumer maps so we can detect disconnected boundary needs per species.
     produced_by: dict[str, list[str]] = {}
     consumed_by: dict[str, list[str]] = {}
@@ -392,7 +375,7 @@ def augment_model(model: libsbml.Model, default_mean: float, epsilon: float, thr
         for sr in reaction.getListOfReactants():
             consumed_by.setdefault(sr.getSpecies(), []).append(rid)
 
-    # Step 7: augment each dynamic species with target, moments, and optional source/sink.
+    # Step 4: augment each dynamic species with target, moments, and optional per-species source/sink.
     for species in _list_floating_species(model):
         sid = species.getId()
         token = _species_token(sid)
@@ -420,15 +403,27 @@ def augment_model(model: libsbml.Model, default_mean: float, epsilon: float, thr
         has_producers = sid in produced_by and len(produced_by[sid]) > 0
         has_consumers = sid in consumed_by and len(consumed_by[sid]) > 0
 
-        # Add source/sink only if the species is disconnected on that side.
+        # Per-species source: independent K_in_<sid> so each disconnected species has its own production rate.
         if not has_producers:
-            _add_source_reaction(model, species, "K_in")
+            kin_id = f"K_in_{sid}"
+            log_kin_id = f"log_K_in_{sid}"
+            _get_or_create_parameter(model, kin_id, 1.0, False)
+            _get_or_create_parameter(model, log_kin_id, 0.0, False)
+            _get_or_create_assignment_rule(model, kin_id, f"pow(10, {log_kin_id})")
+            _add_source_reaction(model, species, kin_id)
             stats["source_reactions_added"] += 1
+            stats["tunable_params"].append(log_kin_id)
 
-        # Add one global sink reaction when species lacks consumers.
+        # Per-species sink: independent K_out_<sid> so each disconnected species has its own degradation rate.
         if not has_consumers:
-            _add_sink_reaction(model, species, "K_out")
+            kout_id = f"K_out_{sid}"
+            log_kout_id = f"log_K_out_{sid}"
+            _get_or_create_parameter(model, kout_id, 3.16, False)
+            _get_or_create_parameter(model, log_kout_id, math.log10(3.16), False)
+            _get_or_create_assignment_rule(model, kout_id, f"pow(10, {log_kout_id})")
+            _add_sink_reaction(model, species, kout_id)
             stats["sink_reactions_added"] += 1
+            stats["tunable_params"].append(log_kout_id)
 
         # Enforce mean tracking target via absolute error inequality.
         if not _has_mean_constraint(model, sid):

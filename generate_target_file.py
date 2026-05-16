@@ -237,37 +237,46 @@ def build_prompt(sbml_data: dict[str, Any]) -> str:
     species = sbml_data["species"]
 
     pathway_name = _clean_text(model.get("model_name", "")) or model.get("model_id", "unknown_pathway")
-    species_list = ", ".join(s["species_id"] for s in species)
 
-    context_json = json.dumps(sbml_data, ensure_ascii=False, indent=2)
+    # Compact per-species summary keeps prompt within model context even for
+    # pathways with hundreds of species. Full SBML JSON would blow context.
+    species_table = []
+    for s in species:
+        species_table.append({
+            "species_id": s["species_id"],
+            "name": _clean_text(s.get("name", "")),
+            "compartment": s.get("compartment", ""),
+            "initial_amount": s.get("initial_amount"),
+            "initial_concentration": s.get("initial_concentration"),
+        })
+
+    species_json = json.dumps(species_table, ensure_ascii=False)
+    species_ids = [s["species_id"] for s in species]
+    species_list_preview = ", ".join(species_ids[:20]) + (
+        f", ... (+{len(species_ids) - 20} more)" if len(species_ids) > 20 else ""
+    )
 
     prompt = f"""
-    For pathway {pathway_name}, provide the average values of the molecules in this pathway,
-specifically: {species_list}.
+        For pathway "{pathway_name}", provide a realistic average steady-state value for each molecule.
 
-You must use ALL information available in the SBML file (unique pathway identifiers,
-RDF annotations, compartments, species, parameters, reactions, kinetic laws, rules,
-constraints, notes, and metadata) provided below as JSON.
+        Species: {species_list_preview}
 
-Goal:
-Provide a realistic numeric target_value for each species_id.
+        Output rules (mandatory):
+        - Reply ONLY with valid JSON, no extra text.
+        - Format:
+        {{
+        "pathway": "{pathway_name}",
+        "targets": [
+            {{"species_id": "<id>", "target_value": <number>}},
+            ...
+        ]
+        }}
+        - Include EXACTLY one entry for EACH species_id below.
+        - target_value must be a finite real number >= 0.
+        - Do not invent species ids not in the list.
 
-Output rules (mandatory):
-- Reply ONLY with valid JSON, with no extra text.
-- Format:
-    {{
-    "pathway": "...",
-    "targets": [
-        {{"species_id": "species_x", "target_value": 0.123}},
-        ...
-    ]
-    }}
-- Include one item for EVERY species_id present.
-- target_value must be a real number >= 0.
-- Do not invent species_id values that are not in the context.
-
-Full SBML context:
-{context_json}
+        Species list (compact JSON):
+        {species_json}
     """
     return textwrap.dedent(prompt).strip()
 

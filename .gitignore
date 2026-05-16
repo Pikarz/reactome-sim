@@ -212,3 +212,5 @@ all_species.*
 homo_sapiens.*
 note.md
 generated_target/
+bench_out/
+working_homo-sapiens/
