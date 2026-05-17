@@ -31,15 +31,15 @@ import pipeline
 # Hardcoded scaling scenarios. Each pair was checked for ≥1 shared species so the
 # merge step is non-trivial. Ordered by combined input size (ascending).
 SCENARIOS = [
-    #{
+    # {
     #    "name": "small",
     #    "file1": "working_homo-sapiens/R-HSA-1660508.sbml",
     #    "file2": "working_homo-sapiens/R-HSA-1660537.sbml",
-    #},
+    # },
     {
          "name": "medium",
-         "file1": "working_homo-sapiens/R-HSA-1059683.sbml",
-         "file2": "working_homo-sapiens/R-HSA-109703.sbml",
+         "file1": "homo_sapiens.3.1.sbml/R-HSA-1059683.sbml",
+         "file2": "homo_sapiens.3.1.sbml/R-HSA-109703.sbml",
     },
     # {
     #     "name": "large",
@@ -352,6 +352,8 @@ def run_scenario(sc: dict, args, out_root: Path) -> ScenarioResult:
             aug_stats["tunable_params"],
             sim_end=args.sim_end,
             iterations=args.iterations,
+            population_size=args.population_size,
+            learning_rate=args.learning_rate,
         )
         res.loss_history = [float(x) for x in loss_history]
         res.initial_loss = res.loss_history[0]
@@ -378,6 +380,19 @@ def run_scenario(sc: dict, args, out_root: Path) -> ScenarioResult:
         ok, detail, _ = check_simulation(sim, species_ids, target_values, tol_rel=args.tol_rel)
         res.targets = {sid: float(target_values[i]) for i, sid in enumerate(species_ids)}
         res.final_state = {sid: float(sim[-1, i + 1]) for i, sid in enumerate(species_ids)}
+        sim_arr = np.asarray(sim)
+        np.savez_compressed(
+            out_root / f"{name}_simulation.npz",
+            time=sim_arr[:, 0],
+            trajectories=sim_arr[:, 1:],
+            species_ids=np.array(species_ids),
+            targets=np.asarray(target_values, dtype=float),
+        )
+        # Stash for plotting without polluting dataclass fields (asdict ignores).
+        res.sim_time = sim_arr[:, 0]
+        res.sim_trajectories = sim_arr[:, 1:]
+        res.sim_species_ids = list(species_ids)
+        res.sim_targets = np.asarray(target_values, dtype=float)
         box["ok"], box["detail"] = ok, detail
     print(
         f"  {'✓' if res.stages[-1].ok else '✗'} simulate: {res.stages[-1].detail} "
@@ -565,6 +580,42 @@ def plot_final_errors(results: list[ScenarioResult], out_path: Path) -> None:
     plt.close()
 
 
+def plot_simulation_trajectories(results: list[ScenarioResult], out_root: Path) -> None:
+    """One PNG per scenario: species trajectories + dashed target horizontal lines."""
+    for r in results:
+        time = getattr(r, "sim_time", None)
+        traj = getattr(r, "sim_trajectories", None)
+        sids = getattr(r, "sim_species_ids", None)
+        tgts = getattr(r, "sim_targets", None)
+        if time is None or traj is None or not sids:
+            continue
+        max_show = 30
+        # Pick species with largest final-value range — most visually informative.
+        order = sorted(range(len(sids)), key=lambda i: abs(traj[-1, i]), reverse=True)[:max_show]
+        cmap = plt.get_cmap("tab20")
+        fig, ax = plt.subplots(figsize=(11, 6))
+        for plot_i, i in enumerate(order):
+            color = cmap(plot_i % 20)
+            ax.plot(time, traj[:, i], color=color, linewidth=1.2, alpha=0.85, label=sids[i])
+            ax.axhline(tgts[i], color=color, linestyle="--", linewidth=0.7, alpha=0.5)
+        ax.set_xlabel("Time")
+        ax.set_ylabel("Concentration")
+        title_suffix = " (synthetic targets)" if r.targets_synthetic else ""
+        ax.set_title(
+            f"{r.name}{title_suffix} — final simulation "
+            f"(top-{len(order)}/{len(sids)} species; dashed = target)"
+        )
+        if np.nanmax(np.abs(traj)) > 0:
+            pos = traj[traj > 0]
+            if pos.size and np.nanmax(traj) / max(np.nanmin(pos), 1e-12) > 100:
+                ax.set_yscale("log")
+        ax.grid(True, which="both", alpha=0.3)
+        ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=7, ncol=1)
+        plt.tight_layout()
+        plt.savefig(out_root / f"{r.name}_simulation.png", dpi=150, bbox_inches="tight")
+        plt.close()
+
+
 def plot_scaling(results: list[ScenarioResult], out_path: Path) -> None:
     """Total wall time and peak RAM vs input size — primary scaling figure."""
     sizes_mb = [r.input_size_bytes / 1024 / 1024 for r in results]
@@ -618,6 +669,10 @@ def main() -> None:
     ap.add_argument("--sim-end", type=float, default=100000.0,
                     help="Simulation horizon used during optimization")
     ap.add_argument("--iterations", type=int, default=5000, help="OpenAI-ES iterations")
+    ap.add_argument("--population-size", type=int, default=20,
+                    help="OpenAI-ES population size")
+    ap.add_argument("--learning-rate", type=float, default=0.01,
+                    help="OpenAI-ES learning rate")
     ap.add_argument("--tol-rel", type=float, default=0.3,
                     help="Relative error tolerance for the simulation correctness check")
     ap.add_argument("--fallback-target", type=float, default=0.5,
@@ -640,6 +695,7 @@ def main() -> None:
                  logy=True, fmt="{:.0f}")
     plot_loss_curves(results, out_root / "loss_curves.png")
     plot_final_errors(results, out_root / "final_errors.png")
+    plot_simulation_trajectories(results, out_root)
     plot_scaling(results, out_root / "scaling.png")
 
     (out_root / "results.json").write_text(
