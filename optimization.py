@@ -98,7 +98,7 @@ def objective_function(
     denom = np.where(np.abs(targets) > 1e-6, np.abs(targets), 1.0)
     return float(np.sum(((yi - targets) / denom) ** 2))
 
-
+    
 def openai_es_minimize(
     init_log_params: np.ndarray,
     parameter_ids: list[str],
@@ -111,98 +111,127 @@ def openai_es_minimize(
     sigma: float = 0.10,
     learning_rate: float = 0.05,
     seed: int = 7,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    eps_adam: float = 1e-8,
+    lr_decay: float = 0.995,
+    grad_clip: float = 5.0,
 ) -> tuple[np.ndarray, list[float]]:
-    # Perform OpenAI-ES style optimization (mirrored/antithetic sampling) on log-parameters.
-    # High-level idea:
-    # 1) sample noise vectors eps_k
-    # 2) evaluate objective at theta +/- sigma * eps_k
-    # 3) convert objective (minimize) into scores (maximize) and estimate gradient in log-space
-    # 4) take a gradient-ascent step on the score (equivalently descent on the objective)
-    if population_size < 2:  # Need at least one mirrored pair; otherwise the estimator is ill-defined.
-        raise ValueError("population_size must be >= 2") 
 
-    rng = np.random.default_rng(seed)  # Create a reproducible random generator for sampling noise.
-    theta = init_log_params.copy()  # Initialize theta (log-parameters) from the provided starting point.
-    history = [] 
-    half = population_size // 2  # We sample half and mirror to get population_size evaluations.
+    if population_size < 2:
+        raise ValueError("population_size must be >= 2")
 
-    rr = roadrunner.RoadRunner(_SBML_PATH)  # Build a fresh simulator instance from the SBML file.
+    rng = np.random.default_rng(seed)
+    theta = init_log_params.copy()
+    history = []
+    half = population_size // 2
 
-    best_theta = theta.copy()  # Track best-seen theta (in log-space) over the whole run.
-    best_f = objective_function(  # Evaluate the objective at the initial candidate.
+    rr = roadrunner.RoadRunner(_SBML_PATH)
+
+    best_theta = theta.copy()
+    best_f = objective_function(
         rr,
-        best_theta, 
-        parameter_ids, 
+        best_theta,
+        parameter_ids,
         species_ids,
-        targets, 
+        targets,
         sim_start,
-        sim_end, 
-    ) 
+        sim_end,
+    )
 
-    for step in range(iterations):
-        eps = rng.standard_normal((half, theta.size))  # Sample Gaussian noise vectors.
+    # Adam state
+    m = np.zeros_like(theta)
+    v = np.zeros_like(theta)
 
-        all_noise = []  # Collect noise vectors used in evaluations.
-        all_scores = []  # Collect corresponding scores for ES weighting.
+    for step in range(1, iterations + 1):
 
-        for e in eps:  # Iterate over sampled noise directions.
-            theta_plus = theta + sigma * e  # Positive perturbation in log-parameter space.
-            theta_minus = theta - sigma * e  # Negative (mirrored) perturbation in log-parameter space.
+        eps = rng.standard_normal((half, theta.size))
 
-            f_plus = objective_function( 
+        all_noise = []
+        all_scores = []
+
+        for e in eps:
+
+            theta_plus = theta + sigma * e
+            theta_minus = theta - sigma * e
+
+            f_plus = objective_function(
                 rr,
-                theta_plus,  
-                parameter_ids,  
-                species_ids,  
-                targets,  
-                sim_start,  
+                theta_plus,
+                parameter_ids,
+                species_ids,
+                targets,
+                sim_start,
                 sim_end
-            )  
-            f_minus = objective_function(  
+            )
+
+            f_minus = objective_function(
                 rr,
-                theta_minus,  
-                parameter_ids,  
-                species_ids, 
-                targets,  
-                sim_start,  
+                theta_minus,
+                parameter_ids,
+                species_ids,
+                targets,
+                sim_start,
                 sim_end
-            )  
+            )
 
-            score_plus = -f_plus  # Convert minimization into maximization score for ES update.
-            score_minus = -f_minus  # Same conversion for the mirrored evaluation.
+            all_noise.append(e)
+            all_scores.append(-f_plus)
 
-            all_noise.append(e) 
-            all_scores.append(score_plus)  
-            all_noise.append(-e)  
-            all_scores.append(score_minus) 
+            all_noise.append(-e)
+            all_scores.append(-f_minus)
 
-        noise_mat = np.vstack(all_noise)  # Stack noise vectors into shape (population_size, dim).
-        scores = np.array(all_scores, dtype=float)  # Convert list of scores into a float numpy array.
+        noise_mat = np.vstack(all_noise)
+        scores = np.array(all_scores, dtype=float)
 
-        scores = (scores - scores.mean()) / (scores.std() + 1e-8)  # Normalize scores for stable learning.
+        # rank-normalization tends to outperform z-score for ES
+        ranks = scores.argsort().argsort()
+        scores = (ranks - ranks.mean()) / (ranks.std() + 1e-8)
 
-        grad_estimate = (scores[:, None] * noise_mat).mean(axis=0) / sigma  # ES gradient estimate.
-        theta = theta + learning_rate * grad_estimate  # Update theta in direction that increases score.
+        grad = (scores[:, None] * noise_mat).mean(axis=0) / sigma
 
-        current_f = objective_function(  
+        # gradient clipping
+        grad_norm = np.linalg.norm(grad)
+        if grad_norm > grad_clip:
+            grad *= grad_clip / grad_norm
+
+        # Adam update
+        m = beta1 * m + (1 - beta1) * grad
+        v = beta2 * v + (1 - beta2) * (grad ** 2)
+
+        m_hat = m / (1 - beta1 ** step)
+        v_hat = v / (1 - beta2 ** step)
+
+        lr_t = learning_rate * (lr_decay ** (step - 1))
+
+        theta += lr_t * m_hat / (np.sqrt(v_hat) + eps_adam)
+
+        current_f = objective_function(
             rr,
-            theta,  
-            parameter_ids,  
-            species_ids, 
-            targets, 
+            theta,
+            parameter_ids,
+            species_ids,
+            targets,
             sim_start,
-            sim_end  
-        )  
-        history.append(current_f)  
+            sim_end
+        )
 
-        if current_f < best_f:  # Check whether we found an improved (lower) objective value.
-            best_f = current_f 
+        history.append(current_f)
+
+        if current_f < best_f:
+            best_f = current_f
             best_theta = theta.copy()
 
-        if step % 10 == 0 or step == iterations - 1:  # Periodically print progress (and always at the end).
-            print(f"iter={step:03d}  F={current_f:.6f}  bestF={best_f:.6f}")  # Status line.
+        if step % 10 == 0 or step == iterations:
+            print(
+                f"iter={step:03d} "
+                f"F={current_f:.6f} "
+                f"bestF={best_f:.6f} "
+                f"lr={lr_t:.5f}"
+            )
 
-    return 10**best_theta, history
+    return 10 ** best_theta, history
+
 
 def write_optimized_params_to_sbml(sbml_path, param_map):
     """

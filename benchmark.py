@@ -39,7 +39,7 @@ SCENARIOS = [
     {
          "name": "medium",
          "file1": "homo_sapiens.3.1.sbml/R-HSA-1059683.sbml",
-         "file2": "homo_sapiens.3.1.sbml/R-HSA-109703.sbml",
+        #     "file2": "working_homo-sapiens/R-HSA-109703.sbml",
     },
     # {
     #     "name": "large",
@@ -67,7 +67,7 @@ class StageMetric:
 class ScenarioResult:
     name: str
     file1: str
-    file2: str
+    file2: str | None
     input_size_bytes: int = 0
     merged_n_species: int = 0
     merged_n_reactions: int = 0
@@ -287,27 +287,38 @@ def run_scenario(sc: dict, args, out_root: Path) -> ScenarioResult:
     aug_path = out_root / f"{name}_augmented.sbml"
     targets_csv = out_root / f"{name}_targets.csv"
 
-    res = ScenarioResult(name=name, file1=sc["file1"], file2=sc["file2"])
-    res.input_size_bytes = Path(sc["file1"]).stat().st_size + Path(sc["file2"]).stat().st_size
-    print(f"\n=== Scenario: {name} ({sc['file1']} + {sc['file2']}) ===")
+    file2 = sc.get("file2")
+    res = ScenarioResult(name=name, file1=sc["file1"], file2=file2)
+    res.input_size_bytes = Path(sc["file1"]).stat().st_size
+    if file2:
+        res.input_size_bytes += Path(file2).stat().st_size
+    scenario_inputs = f"{sc['file1']} + {file2}" if file2 else f"{sc['file1']} (single input)"
+    print(f"\n=== Scenario: {name} ({scenario_inputs}) ===")
 
     aug_stats: dict = {}
     species_ids: list[str] = []
     target_values = np.array([])
 
-    with stage("merge", res.stages) as box:
-        _, info = pipeline.run_merge(sc["file1"], sc["file2"], merged_path)
-        res.merged_n_species = info["n_species"]
-        res.merged_n_reactions = info["n_reactions"]
-        res.merged_size_bytes = merged_path.stat().st_size
-        box["ok"], box["detail"] = check_merge(merged_path, sc["file1"], sc["file2"])
-    if not res.stages[-1].ok:
-        print(f"  ✗ merge: {res.stages[-1].detail}")
-        return res
-    print(f"  ✓ merge: {res.stages[-1].detail} ({res.stages[-1].wall_s:.2f}s)")
+    if file2 and not args.skip_merge:
+        with stage("merge", res.stages) as box:
+            _, info = pipeline.run_merge(sc["file1"], file2, merged_path)
+            res.merged_n_species = info["n_species"]
+            res.merged_n_reactions = info["n_reactions"]
+            res.merged_size_bytes = merged_path.stat().st_size
+            box["ok"], box["detail"] = check_merge(merged_path, sc["file1"], file2)
+        if not res.stages[-1].ok:
+            print(f"  ✗ merge: {res.stages[-1].detail}")
+            return res
+        print(f"  ✓ merge: {res.stages[-1].detail} ({res.stages[-1].wall_s:.2f}s)")
+        merge_input = merged_path
+    else:
+        res.stages.append(
+            StageMetric(name="merge", ok=True, detail="skipped (single input)")
+        )
+        merge_input = Path(sc["file1"])
 
     with stage("augment", res.stages) as box:
-        _, aug_stats = pipeline.run_augment(merged_path, aug_path)
+        _, aug_stats = pipeline.run_augment(merge_input, aug_path)
         res.augmented_size_bytes = aug_path.stat().st_size
         res.n_tunable_params = len(aug_stats.get("tunable_params", []))
         box["ok"], box["detail"] = check_augment(aug_path, aug_stats)
@@ -677,6 +688,8 @@ def main() -> None:
                     help="Relative error tolerance for the simulation correctness check")
     ap.add_argument("--fallback-target", type=float, default=0.5,
                     help="Synthetic target value used when the LLM step fails")
+    ap.add_argument("--skip-merge", action="store_true",
+                    help="Skip merge and use file1 directly (useful for single inputs)")
     args = ap.parse_args()
 
     out_root = Path(args.output_dir)
