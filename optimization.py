@@ -115,7 +115,6 @@ def openai_es_minimize(
     beta2: float = 0.999,
     eps_adam: float = 1e-8,
     lr_decay: float = 0.995,
-    grad_clip: float = 5.0,
 ) -> tuple[np.ndarray, list[float]]:
 
     if population_size < 2:
@@ -189,11 +188,6 @@ def openai_es_minimize(
         scores = (ranks - ranks.mean()) / (ranks.std() + 1e-8)
 
         grad = (scores[:, None] * noise_mat).mean(axis=0) / sigma
-
-        # gradient clipping
-        grad_norm = np.linalg.norm(grad)
-        if grad_norm > grad_clip:
-            grad *= grad_clip / grad_norm
 
         # Adam update
         m = beta1 * m + (1 - beta1) * grad
