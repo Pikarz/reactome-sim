@@ -38,7 +38,7 @@ SCENARIOS = [
     # },
     {
          "name": "medium",
-         "file1": "homo_sapiens.3.1.sbml/R-HSA-1059683.sbml",
+         "file1": "working_homo-sapiens/R-HSA-1059683.sbml",
         #     "file2": "working_homo-sapiens/R-HSA-109703.sbml",
     },
     # {
@@ -355,7 +355,7 @@ def run_scenario(sc: dict, args, out_root: Path) -> ScenarioResult:
         f"  {'✓' if res.stages[-1].ok else '⚠'} targets: {res.stages[-1].detail} "
         f"({res.stages[-1].wall_s:.2f}s)"
     )
-
+    print(f"    (tunable_params={aug_stats.get('tunable_params', [])}, ")
     with stage("optimize", res.stages) as box:
         best_params, loss_history, species_ids, target_values = pipeline.run_optimize(
             aug_path,

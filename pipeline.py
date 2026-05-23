@@ -63,6 +63,10 @@ def _smart_init(tunable_params: list[str], species_ids: list[str], targets: np.n
     target_map = dict(zip(species_ids, np.asarray(targets, dtype=float)))
     init = np.zeros(len(tunable_params), dtype=float)
     for i, pid in enumerate(tunable_params):
+        if pid.startswith("log_k_rxn_"):
+            # Inizializziamo k a 0.01 (10^-2) per evitare esplosioni a catena
+            init[i] = -2.0
+
         for prefix, sign in (("log_K_in_", 1.0), ("log_K_out_", -1.0)):
             if pid.startswith(prefix):
                 sid = pid[len(prefix):]
@@ -86,6 +90,7 @@ def run_optimize(
     seed: int = 7,
 ) -> tuple[np.ndarray, list[float], list[str], np.ndarray]:
     species_ids, targets = optimization.load_targets(str(targets_csv))
+    print(f"Optimizing {len(tunable_params)} parameters to fit {len(species_ids)} targets...")
     init_log_params = _smart_init(tunable_params, species_ids, targets)
     optimization._SBML_PATH = str(sbml_path)
     best_params, loss_history = optimization.openai_es_minimize(
@@ -94,6 +99,7 @@ def run_optimize(
         species_ids=species_ids,
         targets=targets,
         learning_rate=learning_rate,
+        sigma=0.5,
         sim_start=0.0,
         sim_end=sim_end,
         iterations=iterations,

@@ -92,11 +92,16 @@ def objective_function(
     except RuntimeError:
         # Se CVODE fallisce a causa della rigidezza estrema, applichiamo una penalità altissima (1e12).
         # Usiamo un numero finito e non float('inf') per non generare NaN quando ES calcola medie/std.
-        return 1e12
+        return 1e12 + np.random.uniform(0, 1e5)
     # --- FINE MODIFICA ---
 
     denom = np.where(np.abs(targets) > 1e-6, np.abs(targets), 1.0)
-    return float(np.sum(((yi - targets) / denom) ** 2))
+    rel_errors = (yi - targets) / denom
+    
+    # 3. IL SEGRETO: Limitiamo l'errore per non accecare l'ottimizzatore
+    clipped_errors = np.clip(rel_errors, -100, 100)
+
+    return float(np.sum(clipped_errors ** 2))
 
     
 def openai_es_minimize(

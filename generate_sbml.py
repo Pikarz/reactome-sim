@@ -117,18 +117,10 @@ def _reaction_has_kinetic_law(reaction: libsbml.Reaction) -> bool:
 
 def _pow_term(species_id: str, stoich: float) -> str:
     # For stoichiometry 1, omit exponent for cleaner formulas.
-    if abs(stoich - 1.0) < 1e-12:
-        return species_id
-
-    # Integer exponents are rendered as integers for readability.
-    if float(stoich).is_integer():
-        return f"pow({species_id},{int(stoich)})"
-
-    # Non-integer stoichiometry retains floating exponent.
-    return f"pow({species_id},{stoich})"
+    return species_id
 
 
-def _build_mass_action_formula(reaction: libsbml.Reaction) -> str:
+def _build_mass_action_formula(reaction: libsbml.Reaction, k_id: str) -> str:
     # Collect multiplicative terms for all reactants in a standard mass-action product.
     terms: list[str] = []
     for sr in reaction.getListOfReactants():
@@ -139,23 +131,33 @@ def _build_mass_action_formula(reaction: libsbml.Reaction) -> str:
         return "0"
 
     # Join terms as a product expression.
-    return " * ".join(terms)
+    return f"{k_id} * " + " * ".join(terms)
 
 
-def _add_kinetic_laws_if_missing(model: libsbml.Model) -> int:
+def _add_kinetic_laws_if_missing(model: libsbml.Model, k_default: float) -> tuple[int, list[str]]:
     # Track how many reactions were updated.
     updated = 0
+    tunable_params: list[str] = []
+    log_default = math.log10(k_default) if k_default > 0 else 0.0
 
     # Fill only reactions missing kinetic laws; do not overwrite curated laws.
-    for reaction in model.getListOfReactions():
+    for idx, reaction in enumerate(model.getListOfReactions()):
         if _reaction_has_kinetic_law(reaction):
             continue
+        rid = reaction.getId() or f"reaction_{idx + 1}"
+        token = _safe_id(rid)
+        k_id = f"k_rxn_{token}"
+        log_k_id = f"log_k_rxn_{token}"
+        _get_or_create_parameter(model, k_id, k_default, False)
+        _get_or_create_parameter(model, log_k_id, log_default, False)
+        _get_or_create_assignment_rule(model, k_id, f"pow(10, {log_k_id})")
         kl = reaction.createKineticLaw()
-        kl.setMath(libsbml.parseL3Formula(_build_mass_action_formula(reaction)))
+        kl.setMath(libsbml.parseL3Formula(_build_mass_action_formula(reaction, k_id)))
         updated += 1
+        tunable_params.append(log_k_id)
 
     # Return number of inserted kinetic laws for reporting.
-    return updated
+    return updated, tunable_params
 
 
 def _species_initial_value(species: libsbml.Species, fallback: float) -> float:
@@ -297,6 +299,8 @@ def _cleanup_previous_generated_content(model: libsbml.Model) -> None:
             or pid.startswith("y2_species_")
             or pid.startswith("K_in_species_")
             or pid.startswith("K_out_species_")
+            or pid.startswith("k_rxn_")
+            or pid.startswith("log_k_rxn_")
         ),
     )
 
@@ -307,6 +311,7 @@ def _cleanup_previous_generated_content(model: libsbml.Model) -> None:
             var.startswith("z_")
             or var.startswith("y_species_")
             or var.startswith("y2_species_")
+            or var.startswith("k_rxn_")
         ),
     )
 
@@ -355,11 +360,13 @@ def augment_model(model: libsbml.Model, default_mean: float, epsilon: float, thr
         "tunable_params": [],
     }
 
-    # Step 1: ensure every reaction has a kinetic law.
-    stats["kinetic_laws_added"] = _add_kinetic_laws_if_missing(model)
-
-    # Step 2: remove previously generated artifacts for idempotent reruns.
+    # Step 1: remove previously generated artifacts for idempotent reruns.
     _cleanup_previous_generated_content(model)
+
+    # Step 2: ensure every reaction has a kinetic law.
+    kinetic_laws_added, kinetic_tunables = _add_kinetic_laws_if_missing(model, k_default)
+    stats["kinetic_laws_added"] = kinetic_laws_added
+    stats["tunable_params"].extend(kinetic_tunables)
 
     # Step 3: create global numeric controls used in generated rules/constraints.
     _get_or_create_parameter(model, "epsilon", epsilon, True)
