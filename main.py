@@ -49,6 +49,13 @@ def main():
     )
     print(f"  → {csv_path} ({'cache hit' if cache_hit else 'fresh LLM call'})")
 
+    print("\n[Step 2.5] Inject references (Hill thresholds M + compartment volumes)")
+    inj = pipeline.run_inject_references(aug_path, csv_path)
+    print(
+        f"  → M set={inj['m_set']}, mu set={inj['mu_set']}, "
+        f"volumes set={inj['volumes_set']}"
+    )
+
     print(f"\n[Step 3] Optimize ({len(stats['tunable_params'])} params, {args.iterations} iters)")
     best_params, loss_history, species_ids, target_values = pipeline.run_optimize(
         aug_path,

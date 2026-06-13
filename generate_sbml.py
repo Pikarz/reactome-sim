@@ -1,6 +1,7 @@
 from __future__ import annotations
 import argparse
 import math
+import re
 from pathlib import Path
 from typing import Iterable
 import libsbml
@@ -120,6 +121,64 @@ def _pow_term(species_id: str, stoich: float) -> str:
     return species_id
 
 
+# Hill coefficient fixed at 10 per the model definition (steep, switch-like response).
+_HILL_N = 10
+
+
+def _hill_plus(species_id: str, m_id: str) -> str:
+    # Activating Hill term H+(x, M) = (x/M)^n / (1 + (x/M)^n).
+    # Near 0 when x << M, saturates to 1 when x >> M.
+    ratio = f"pow({species_id} / {m_id}, {_HILL_N})"
+    return f"({ratio} / (1 + {ratio}))"
+
+
+def _hill_minus(species_id: str, m_id: str) -> str:
+    # Inhibiting Hill term H-(x, M) = 1 / (1 + (x/M)^n).
+    # Near 1 when x << M, drops toward 0 when x >> M.
+    ratio = f"pow({species_id} / {m_id}, {_HILL_N})"
+    return f"(1 / (1 + {ratio}))"
+
+
+# SBO terms that denote a negative (inhibitory) modifier. Anything else acting as a
+# modifier (catalyst, stimulator, generic modifier) is treated as positive.
+_INHIBITOR_SBO = {
+    "SBO:0000020",  # inhibitor
+    "SBO:0000206",  # competitive inhibitor
+    "SBO:0000207",  # non-competitive inhibitor
+    "SBO:0000169",  # inhibition
+    "SBO:0000536",  # partial inhibitor
+    "SBO:0000537",  # complete inhibitor
+}
+
+
+def _modifier_is_inhibitor(modifier_ref: libsbml.ModifierSpeciesReference, species: libsbml.Species) -> bool:
+    # Prefer the SBO on the modifier reference, fall back to the SBO on the species.
+    sbo = ""
+    if modifier_ref is not None and modifier_ref.isSetSBOTerm():
+        sbo = modifier_ref.getSBOTermID()
+    elif species is not None and species.isSetSBOTerm():
+        sbo = species.getSBOTermID()
+    return sbo in _INHIBITOR_SBO
+
+
+def _modifier_hill_terms(model: libsbml.Model, reaction: libsbml.Reaction, threshold_m: float) -> list[str]:
+    # One Hill factor per modifier: activators/catalysts gate the rate with H+ (the
+    # reaction needs the regulator present), inhibitors gate it with H-. M is the
+    # regulator's own per-species threshold (filled from references during injection).
+    terms: list[str] = []
+    for mr in reaction.getListOfModifiers():
+        msid = mr.getSpecies()
+        m_id = f"M_{_species_token(msid)}"
+        # Ensure the threshold parameter exists even if the modifier is a boundary
+        # species (which the per-species loop below would otherwise skip).
+        _get_or_create_parameter(model, m_id, threshold_m, True)
+        if _modifier_is_inhibitor(mr, model.getSpecies(msid)):
+            terms.append(_hill_minus(msid, m_id))
+        else:
+            terms.append(_hill_plus(msid, m_id))
+    return terms
+
+
 def _build_mass_action_formula(reaction: libsbml.Reaction, k_id: str) -> str:
     # Collect multiplicative terms for all reactants in a standard mass-action product.
     terms: list[str] = []
@@ -134,7 +193,7 @@ def _build_mass_action_formula(reaction: libsbml.Reaction, k_id: str) -> str:
     return f"{k_id} * " + " * ".join(terms)
 
 
-def _add_kinetic_laws_if_missing(model: libsbml.Model, k_default: float) -> tuple[int, list[str]]:
+def _add_kinetic_laws_if_missing(model: libsbml.Model, k_default: float, threshold_m: float) -> tuple[int, list[str]]:
     # Track how many reactions were updated.
     updated = 0
     tunable_params: list[str] = []
@@ -151,8 +210,14 @@ def _add_kinetic_laws_if_missing(model: libsbml.Model, k_default: float) -> tupl
         _get_or_create_parameter(model, k_id, k_default, False)
         _get_or_create_parameter(model, log_k_id, log_default, False)
         _get_or_create_assignment_rule(model, k_id, f"pow(10, {log_k_id})")
+        # Mass-action base, optionally gated by Hill regulation from any modifiers.
+        formula = _build_mass_action_formula(reaction, k_id)
+        if formula != "0":
+            hill_terms = _modifier_hill_terms(model, reaction, threshold_m)
+            if hill_terms:
+                formula = " * ".join([formula, *hill_terms])
         kl = reaction.createKineticLaw()
-        kl.setMath(libsbml.parseL3Formula(_build_mass_action_formula(reaction, k_id)))
+        kl.setMath(libsbml.parseL3Formula(formula))
         updated += 1
         tunable_params.append(log_k_id)
 
@@ -197,7 +262,7 @@ def _add_source_reaction(model: libsbml.Model, species: libsbml.Species, k_id: s
     prod.setStoichiometry(1.0)
     prod.setConstant(True)
 
-    # Source rate is controlled by parameter K_in (or whichever k_id is provided).
+    # Source rate is the constant influx K_in (paper form: dx/dt = K_in - consumers).
     kl = rxn.createKineticLaw()
     kl.setMath(libsbml.parseL3Formula(k_id))
 
@@ -226,7 +291,8 @@ def _add_sink_reaction(model: libsbml.Model, species: libsbml.Species, k_id: str
     rea.setStoichiometry(1.0)
     rea.setConstant(True)
 
-    # Sink rate is proportional to species amount: K_out * species.
+    # Sink rate is proportional to the species amount: K_out * species
+    # (paper form: dx/dt = producers - K_out * x).
     kl = rxn.createKineticLaw()
     kl.setMath(libsbml.parseL3Formula(f"{k_id} * {species.getId()}"))
 
@@ -293,7 +359,9 @@ def _cleanup_previous_generated_content(model: libsbml.Model) -> None:
     _remove_matching_parameters(
         model,
         lambda pid: (
-            pid.startswith("z_")
+            pid == "M"
+            or pid.startswith("z_")
+            or pid.startswith("M_")
             or pid.startswith("mu_species_")
             or pid.startswith("y_species_")
             or pid.startswith("y2_species_")
@@ -338,15 +406,41 @@ def _cleanup_previous_generated_content(model: libsbml.Model) -> None:
             model.removeReaction(i)
 
 
-def _read_sbml_with_namespace_fix(input_path: Path) -> libsbml.SBMLDocument:
-    # Some files use non-canonical MathML namespace casing; normalize before parsing.
-    text = input_path.read_text(encoding="utf-8")
+def _normalize_mathml_namespace(text: str) -> str:
+    # Some Reactome/round-tripped files declare the MathML namespace under a prefix
+    # (e.g. <ns7:math>, <ns8:apply>) and/or with non-canonical casing
+    # (".../math/MathML"). libSBML's L3 validator rejects prefixed <math> blocks even
+    # when the namespace URI is correct, so we rewrite them to default-namespace
+    # MathML (<math xmlns="...Math/MathML">) before parsing.
 
-    # Replace each alias with canonical namespace to avoid parser inconsistencies.
+    # 1) Canonicalize any alias casing of the MathML namespace URI.
     for alias in _MATHML_NS_ALIASES:
         text = text.replace(alias, _MATHML_NS_CANONICAL)
 
-    # Parse normalized string into an SBML document object.
+    # 2) Find every prefix currently bound to the (now canonical) MathML namespace.
+    prefixes = set(
+        re.findall(rf'xmlns:(\w+)="{re.escape(_MATHML_NS_CANONICAL)}"', text)
+    )
+
+    # 3) For each such prefix, strip it from element tags and put the MathML namespace
+    #    as the default namespace on the <math> element itself.
+    for prefix in prefixes:
+        # Open tag of math: carry the namespace as default. Handles both
+        # "<ns7:math>" and "<ns7:math attr=...>" forms.
+        text = text.replace(f"<{prefix}:math", f'<math xmlns="{_MATHML_NS_CANONICAL}"')
+        # Remaining open/self-closing tags (apply, ci, cn, power, ...): drop the prefix.
+        text = text.replace(f"<{prefix}:", "<")
+        # Closing tags: drop the prefix.
+        text = text.replace(f"</{prefix}:", "</")
+        # Remove the now-unused namespace declaration (with leading space if present).
+        text = re.sub(rf'\s*xmlns:{prefix}="{re.escape(_MATHML_NS_CANONICAL)}"', "", text)
+
+    return text
+
+
+def _read_sbml_with_namespace_fix(input_path: Path) -> libsbml.SBMLDocument:
+    # Normalize MathML namespace usage, then parse into an SBML document object.
+    text = _normalize_mathml_namespace(input_path.read_text(encoding="utf-8"))
     return libsbml.readSBMLFromString(text)
 
 
@@ -364,13 +458,13 @@ def augment_model(model: libsbml.Model, default_mean: float, epsilon: float, thr
     _cleanup_previous_generated_content(model)
 
     # Step 2: ensure every reaction has a kinetic law.
-    kinetic_laws_added, kinetic_tunables = _add_kinetic_laws_if_missing(model, k_default)
+    kinetic_laws_added, kinetic_tunables = _add_kinetic_laws_if_missing(model, k_default, threshold_m)
     stats["kinetic_laws_added"] = kinetic_laws_added
     stats["tunable_params"].extend(kinetic_tunables)
 
     # Step 3: create global numeric controls used in generated rules/constraints.
+    # Hill thresholds M are now per-species (M_<token>), created in the loop below.
     _get_or_create_parameter(model, "epsilon", epsilon, True)
-    _get_or_create_parameter(model, "M", threshold_m, True)
 
     # Build producer/consumer maps so we can detect disconnected boundary needs per species.
     produced_by: dict[str, list[str]] = {}
@@ -391,6 +485,11 @@ def augment_model(model: libsbml.Model, default_mean: float, epsilon: float, thr
         _get_or_create_parameter(model, f"mu_{token}", default_mean, True)
         _get_or_create_parameter(model, f"y_{token}", 0.0, False)
         _get_or_create_parameter(model, f"y2_{token}", 0.0, False)
+
+        # Per-species Hill threshold M_<token>. Placeholder until the reference
+        # concentration from the LLM/literature is injected (see inject_references).
+        m_id = f"M_{token}"
+        _get_or_create_parameter(model, m_id, threshold_m, True)
 
         # Running estimators for mean and second moment.
         _get_or_create_rate_rule(
@@ -444,6 +543,71 @@ def augment_model(model: libsbml.Model, default_mean: float, epsilon: float, thr
     return stats
 
 
+def inject_references(
+    model: libsbml.Model,
+    concentration_by_species: dict[str, float],
+    volume_by_compartment: dict[str, float],
+    min_threshold: float = 1e-9,
+) -> dict:
+    # Write the reference concentrations (Hill thresholds M and target means mu)
+    # and the compartment volumes obtained from the LLM/literature into an already
+    # augmented model. Run between target generation and optimization.
+    stats = {"m_set": 0, "mu_set": 0, "volumes_set": 0}
+
+    # Per-species Hill threshold and target mean use the reference concentration.
+    # The species symbol in the kinetic-law math is a concentration (the species is
+    # not substance-only), so M must be expressed in concentration units too.
+    for species in model.getListOfSpecies():
+        sid = species.getId()
+        if sid not in concentration_by_species:
+            continue
+        token = _species_token(sid)
+        # Guard against a zero/negative threshold which would break the Hill ratio.
+        m_value = max(float(concentration_by_species[sid]), min_threshold)
+
+        m_param = model.getParameter(f"M_{token}")
+        if m_param is not None:
+            m_param.setValue(m_value)
+            stats["m_set"] += 1
+
+        mu_param = model.getParameter(f"mu_{token}")
+        if mu_param is not None:
+            mu_param.setValue(float(concentration_by_species[sid]))
+            stats["mu_set"] += 1
+
+    # Compartment sizes carry the volume so RoadRunner converts concentration to
+    # abundance (amount = concentration * volume) consistently across the model.
+    for comp_id, volume in volume_by_compartment.items():
+        comp = model.getCompartment(comp_id)
+        if comp is None:
+            continue
+        comp.setSize(float(volume))
+        comp.setConstant(True)
+        stats["volumes_set"] += 1
+
+    return stats
+
+
+def inject_references_into_file(
+    sbml_path: str,
+    concentration_by_species: dict[str, float],
+    volume_by_compartment: dict[str, float],
+) -> dict:
+    # Path-based wrapper: read, inject references, validate, write back in place.
+    from pathlib import Path
+
+    doc = _read_sbml_with_namespace_fix(Path(sbml_path))
+    model = doc.getModel()
+    if model is None:
+        raise ValueError("Invalid SBML: missing <model>.")
+    stats = inject_references(model, concentration_by_species, volume_by_compartment)
+    validate_document(doc)
+    writer = libsbml.SBMLWriter()
+    if not writer.writeSBMLToFile(doc, str(sbml_path)):
+        raise RuntimeError(f"Failed to write SBML to {sbml_path}")
+    return stats
+
+
 def validate_document(doc: libsbml.SBMLDocument) -> None:
     errors = []
     for i in range(doc.getNumErrors()):
@@ -465,7 +629,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--inplace", action="store_true", help="Overwrite the input file")
     parser.add_argument("--default-mean", type=float, default=0.5, help="Default mu_i target used for all species")
     parser.add_argument("--epsilon", type=float, default=1e-6, help="epsilon for running mean/second moment rules")
-    parser.add_argument("--threshold-m", type=float, default=1.0, help="Threshold M used by z_i rule")
+    parser.add_argument("--threshold-m", type=float, default=1.0, help="Default per-species Hill threshold M (placeholder until references are injected)")
     parser.add_argument("--k-default", type=float, default=0.1, help="Initial value for K_in/K_out parameters")
 
     return parser.parse_args()

@@ -95,13 +95,19 @@ def objective_function(
         return 1e12 + np.random.uniform(0, 1e5)
     # --- FINE MODIFICA ---
 
-    denom = np.where(np.abs(targets) > 1e-6, np.abs(targets), 1.0)
-    rel_errors = (yi - targets) / denom
-    
-    # 3. IL SEGRETO: Limitiamo l'errore per non accecare l'ottimizzatore
-    clipped_errors = np.clip(rel_errors, -100, 100)
+    # Log-space error: targets span many orders of magnitude (e.g. 9e-8 ... 1e-4
+    # after the concentration*volume conversion), so we fit log10(sim) to
+    # log10(target). This is scale-free (every species weighted equally) AND, unlike
+    # a clipped relative error, never saturates: a species that is 5 orders of
+    # magnitude off contributes err=5 with a live gradient, instead of a flat
+    # clipped plateau that blinds the optimizer. The floor guards log10 against
+    # zero/negative simulated values from solver noise.
+    floor = 1e-30
+    log_sim = np.log10(np.maximum(yi, floor))
+    log_tgt = np.log10(np.maximum(targets, floor))
+    errors = log_sim - log_tgt
 
-    return float(np.sum(clipped_errors ** 2))
+    return float(np.sum(errors ** 2))
 
     
 def openai_es_minimize(
@@ -114,12 +120,16 @@ def openai_es_minimize(
     iterations: int = 60,
     population_size: int = 20,
     sigma: float = 0.10,
-    learning_rate: float = 0.05,
+    learning_rate: float = 0.1,
     seed: int = 7,
     beta1: float = 0.9,
     beta2: float = 0.999,
     eps_adam: float = 1e-8,
     lr_decay: float = 0.995,
+    min_lr_frac: float = 0.5,
+    sigma_decay: float = 0.999,
+    min_sigma_frac: float = 0.2,
+    target_loss: float | None = None,
 ) -> tuple[np.ndarray, list[float]]:
 
     if population_size < 2:
@@ -147,7 +157,13 @@ def openai_es_minimize(
     m = np.zeros_like(theta)
     v = np.zeros_like(theta)
 
+    min_sigma = sigma * min_sigma_frac
+
     for step in range(1, iterations + 1):
+
+        # Shrink the perturbation over time (floored) so the search explores widely
+        # early and can fine-tune near the optimum instead of wandering away from it.
+        sigma_t = max(sigma * (sigma_decay ** (step - 1)), min_sigma)
 
         eps = rng.standard_normal((half, theta.size))
 
@@ -156,8 +172,8 @@ def openai_es_minimize(
 
         for e in eps:
 
-            theta_plus = theta + sigma * e
-            theta_minus = theta - sigma * e
+            theta_plus = theta + sigma_t * e
+            theta_minus = theta - sigma_t * e
 
             f_plus = objective_function(
                 rr,
@@ -192,7 +208,7 @@ def openai_es_minimize(
         ranks = scores.argsort().argsort()
         scores = (ranks - ranks.mean()) / (ranks.std() + 1e-8)
 
-        grad = (scores[:, None] * noise_mat).mean(axis=0) / sigma
+        grad = (scores[:, None] * noise_mat).mean(axis=0) / sigma_t
 
         # Adam update
         m = beta1 * m + (1 - beta1) * grad
@@ -201,7 +217,11 @@ def openai_es_minimize(
         m_hat = m / (1 - beta1 ** step)
         v_hat = v / (1 - beta2 ** step)
 
-        lr_t = learning_rate * (lr_decay ** (step - 1))
+        # Geometric decay was tuned for ~60 iterations; over thousands of steps it
+        # drives lr to ~0 within a few hundred iters. Floor it at a fraction of the
+        # initial lr so the search keeps making progress for the whole budget.
+        min_lr = learning_rate * min_lr_frac
+        lr_t = max(learning_rate * (lr_decay ** (step - 1)), min_lr)
 
         theta += lr_t * m_hat / (np.sqrt(v_hat) + eps_adam)
 
@@ -228,6 +248,12 @@ def openai_es_minimize(
                 f"bestF={best_f:.6f} "
                 f"lr={lr_t:.5f}"
             )
+
+        # Stop early once the best solution is good enough; no point spending the
+        # remaining budget polishing an already-converged fit.
+        if target_loss is not None and best_f <= target_loss:
+            print(f"early stop at iter={step}: bestF={best_f:.6g} <= target_loss={target_loss:.6g}")
+            break
 
     return 10 ** best_theta, history
 

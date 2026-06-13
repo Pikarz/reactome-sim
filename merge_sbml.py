@@ -9,6 +9,8 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import libsbml
 
+import generate_sbml
+
 
 LOGGER = logging.getLogger("sbml_merge")
 
@@ -151,7 +153,10 @@ def _clone_document(doc: libsbml.SBMLDocument) -> libsbml.SBMLDocument:
 
 
 def _read_document(path: str) -> libsbml.SBMLDocument:
-    doc = libsbml.readSBML(path)
+    # Normalize prefixed/non-canonical MathML namespaces (e.g. <ns7:math>) so the
+    # math survives the merge round-trip and stays valid downstream.
+    text = generate_sbml._normalize_mathml_namespace(Path(path).read_text(encoding="utf-8"))
+    doc = libsbml.readSBMLFromString(text)
     if doc is None:
         raise ValueError(f"Could not read SBML file: {path}")
 

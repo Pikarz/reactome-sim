@@ -235,6 +235,7 @@ def parse_sbml(sbml_path: str) -> dict[str, Any]:
 def build_prompt(sbml_data: dict[str, Any]) -> str:
     model = sbml_data["model_info"]
     species = sbml_data["species"]
+    compartments = sbml_data.get("compartments", [])
 
     pathway_name = _clean_text(model.get("model_name", "")) or model.get("model_id", "unknown_pathway")
 
@@ -250,14 +251,23 @@ def build_prompt(sbml_data: dict[str, Any]) -> str:
             "initial_concentration": s.get("initial_concentration"),
         })
 
+    # Compartment summary lets the LLM supply a physical volume for each one.
+    compartment_table = [
+        {"compartment_id": c.get("id", ""), "name": _clean_text(c.get("name", ""))}
+        for c in compartments
+    ]
+
     species_json = json.dumps(species_table, ensure_ascii=False)
+    compartment_json = json.dumps(compartment_table, ensure_ascii=False)
     species_ids = [s["species_id"] for s in species]
     species_list_preview = ", ".join(species_ids[:20]) + (
         f", ... (+{len(species_ids) - 20} more)" if len(species_ids) > 20 else ""
     )
 
     prompt = f"""
-        For pathway "{pathway_name}", provide a realistic average steady-state value for each molecule.
+        For pathway "{pathway_name}", provide two things from biological literature:
+        1. A realistic MEAN steady-state CONCENTRATION (in mM, i.e. mmol/L) for each molecular species.
+        2. A realistic physical VOLUME (in litres, L) for each cellular compartment.
 
         Species: {species_list_preview}
 
@@ -266,17 +276,25 @@ def build_prompt(sbml_data: dict[str, Any]) -> str:
         - Format:
         {{
         "pathway": "{pathway_name}",
+        "compartments": [
+            {{"compartment_id": "<id>", "volume_litres": <number>}},
+            ...
+        ],
         "targets": [
-            {{"species_id": "<id>", "target_value": <number>}},
+            {{"species_id": "<id>", "concentration": <number>}},
             ...
         ]
         }}
-        - Include EXACTLY one entry for EACH species_id below.
-        - target_value must be a finite real number >= 0.
-        - Do not invent species ids not in the list.
+        - Include EXACTLY one entry for EACH species_id and EACH compartment_id below.
+        - concentration must be a finite real number >= 0 (mean concentration in mM).
+        - volume_litres must be a finite real number > 0 (compartment volume in L).
+        - Do not invent ids that are not in the lists.
 
         Species list (compact JSON):
         {species_json}
+
+        Compartment list (compact JSON):
+        {compartment_json}
     """
     return textwrap.dedent(prompt).strip()
 
@@ -339,47 +357,135 @@ def extract_json_from_text(text: str) -> dict[str, Any]:
         return json.loads(match.group(0))
 
 
-def validate_targets(data: dict[str, Any], expected_species_ids: list[str]) -> list[tuple[str, float]]:
+def validate_concentrations(data: dict[str, Any], expected_species_ids: list[str]) -> dict[str, float]:
     targets = data.get("targets")
     if not isinstance(targets, list):
         raise ValueError("The returned JSON does not contain a 'targets' list.")
 
-    parsed_targets: dict[str, float] = {}
+    parsed: dict[str, float] = {}
     for item in targets:
         if not isinstance(item, dict):
             raise ValueError("Each item in 'targets' must be an object.")
         species_id = item.get("species_id")
-        target_value = item.get("target_value")
+        # Accept the new 'concentration' key, fall back to legacy 'target_value'.
+        value = item.get("concentration", item.get("target_value"))
 
         if species_id is None:
             raise ValueError("Missing 'species_id' field in a 'targets' item.")
-        if target_value is None:
-            raise ValueError(f"Missing 'target_value' field for species_id={species_id}.")
+        if value is None:
+            raise ValueError(f"Missing 'concentration' field for species_id={species_id}.")
 
         try:
-            numeric_value = float(target_value)
+            numeric_value = float(value)
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"Non-numeric target_value for species_id={species_id}: {target_value}") from exc
+            raise ValueError(f"Non-numeric concentration for species_id={species_id}: {value}") from exc
 
         if numeric_value < 0:
-            raise ValueError(f"Negative target_value for species_id={species_id}: {numeric_value}")
+            raise ValueError(f"Negative concentration for species_id={species_id}: {numeric_value}")
 
-        parsed_targets[str(species_id)] = numeric_value
+        parsed[str(species_id)] = numeric_value
 
-    missing = [sid for sid in expected_species_ids if sid not in parsed_targets]
+    missing = [sid for sid in expected_species_ids if sid not in parsed]
     if missing:
         raise ValueError(f"Missing species in LLM response: {missing}")
 
-    ordered = [(sid, parsed_targets[sid]) for sid in expected_species_ids]
-    return ordered
+    return parsed
 
 
-def write_csv(rows: list[tuple[str, float]], output_path: str) -> None:
+def validate_volumes(data: dict[str, Any], expected_compartment_ids: list[str]) -> dict[str, float]:
+    comps = data.get("compartments")
+    if not isinstance(comps, list):
+        raise ValueError("The returned JSON does not contain a 'compartments' list.")
+
+    parsed: dict[str, float] = {}
+    for item in comps:
+        if not isinstance(item, dict):
+            raise ValueError("Each item in 'compartments' must be an object.")
+        comp_id = item.get("compartment_id")
+        volume = item.get("volume_litres", item.get("volume"))
+
+        if comp_id is None:
+            raise ValueError("Missing 'compartment_id' field in a 'compartments' item.")
+        if volume is None:
+            raise ValueError(f"Missing 'volume_litres' field for compartment_id={comp_id}.")
+
+        try:
+            numeric_value = float(volume)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Non-numeric volume for compartment_id={comp_id}: {volume}") from exc
+
+        if numeric_value <= 0:
+            raise ValueError(f"Non-positive volume for compartment_id={comp_id}: {numeric_value}")
+
+        parsed[str(comp_id)] = numeric_value
+
+    missing = [cid for cid in expected_compartment_ids if cid not in parsed]
+    if missing:
+        raise ValueError(f"Missing compartments in LLM response: {missing}")
+
+    return parsed
+
+
+def build_target_rows(
+    species: list[dict[str, Any]],
+    concentration_by_species: dict[str, float],
+    volume_by_compartment: dict[str, float],
+) -> list[tuple[str, float, float, str, float]]:
+    # Convert each species' mean concentration to an abundance (the quantity the
+    # simulator reports for a plain species id) via abundance = concentration * volume.
+    rows: list[tuple[str, float, float, str, float]] = []
+    for s in species:
+        sid = s["species_id"]
+        if sid not in concentration_by_species:
+            continue
+        comp = s.get("compartment", "")
+        volume = volume_by_compartment.get(comp, 1.0)
+        concentration = concentration_by_species[sid]
+        abundance = concentration * volume
+        rows.append((sid, abundance, concentration, comp, volume))
+    return rows
+
+
+def write_csv(rows: list[tuple[str, float, float, str, float]], output_path: str) -> None:
     with open(output_path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["species_id", "target_value"])
-        for species_id, target_value in rows:
-            writer.writerow([species_id, target_value])
+        # Column 2 (target_value) is the abundance the optimizer fits against;
+        # the remaining columns preserve the concentration/volume provenance and
+        # are consumed by the reference-injection step.
+        writer.writerow(["species_id", "target_value", "concentration", "compartment", "volume"])
+        for species_id, abundance, concentration, compartment, volume in rows:
+            writer.writerow([species_id, abundance, concentration, compartment, volume])
+
+
+def csv_has_reference_columns(csv_path: str) -> bool:
+    # True only for the rich CSV that carries concentration + volume provenance.
+    with open(csv_path, "r", newline="", encoding="utf-8") as handle:
+        header = next(csv.reader(handle), [])
+    return {"concentration", "compartment", "volume"}.issubset(set(header))
+
+
+def read_reference_maps(csv_path: str) -> tuple[dict[str, float], dict[str, float]]:
+    # Rebuild (concentration_by_species, volume_by_compartment) from the rich CSV
+    # so the injection step does not need to re-query the LLM.
+    if not csv_has_reference_columns(csv_path):
+        raise ValueError(
+            f"{csv_path} is missing concentration/compartment/volume columns "
+            "(stale 2-column format). Regenerate targets so the references can be injected."
+        )
+
+    concentration_by_species: dict[str, float] = {}
+    volume_by_compartment: dict[str, float] = {}
+    with open(csv_path, "r", newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            sid = row.get("species_id")
+            if not sid:
+                continue
+            concentration_by_species[sid] = float(row["concentration"])
+            comp = row.get("compartment", "")
+            if comp:
+                volume_by_compartment[comp] = float(row["volume"])
+    return concentration_by_species, volume_by_compartment
 
 
 def resolve_output_paths(
@@ -457,7 +563,10 @@ def main() -> int:
     response_json = extract_json_from_text(model_response_text)
 
     expected_species_ids = [s["species_id"] for s in sbml_data["species"]]
-    rows = validate_targets(response_json, expected_species_ids)
+    expected_compartment_ids = [c["id"] for c in sbml_data["compartments"]]
+    concentration_map = validate_concentrations(response_json, expected_species_ids)
+    volume_map = validate_volumes(response_json, expected_compartment_ids)
+    rows = build_target_rows(sbml_data["species"], concentration_map, volume_map)
 
     write_csv(rows, output_csv_path)
 

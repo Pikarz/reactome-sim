@@ -40,16 +40,31 @@ def run_generate_targets(
     sbml_path: Path, csv_path: Path, model: str = "llama3.2:3b", use_cache: bool = True
 ) -> tuple[Path, bool]:
     """Return (csv_path, cache_hit). Calls LLM only when cache is absent or disabled."""
-    if use_cache and csv_path.exists():
+    # Reuse the cache only if it is the rich CSV (with concentration/volume columns);
+    # a stale 2-column file would silently skip reference injection.
+    if use_cache and csv_path.exists() and generate_target_file.csv_has_reference_columns(str(csv_path)):
         return csv_path, True
     sbml_data = generate_target_file.parse_sbml(str(sbml_path))
     prompt = generate_target_file.build_prompt(sbml_data)
     response_text = generate_target_file.call_ollama(prompt, model, temperature=0.2)
     response_json = generate_target_file.extract_json_from_text(response_text)
     expected_species_ids = [s["species_id"] for s in sbml_data["species"]]
-    rows = generate_target_file.validate_targets(response_json, expected_species_ids)
+    expected_compartment_ids = [c["id"] for c in sbml_data["compartments"]]
+    concentration_map = generate_target_file.validate_concentrations(response_json, expected_species_ids)
+    volume_map = generate_target_file.validate_volumes(response_json, expected_compartment_ids)
+    rows = generate_target_file.build_target_rows(sbml_data["species"], concentration_map, volume_map)
     generate_target_file.write_csv(rows, str(csv_path))
     return csv_path, False
+
+
+def run_inject_references(sbml_path: Path, targets_csv: Path) -> dict:
+    """Write reference concentrations (Hill thresholds M, target means mu) and
+    compartment volumes from the targets CSV into the augmented SBML. Must run
+    after target generation and before optimization."""
+    concentration_map, volume_map = generate_target_file.read_reference_maps(str(targets_csv))
+    return generate_sbml.inject_references_into_file(
+        str(sbml_path), concentration_map, volume_map
+    )
 
 
 def _smart_init(tunable_params: list[str], species_ids: list[str], targets: np.ndarray) -> np.ndarray:
@@ -88,6 +103,7 @@ def run_optimize(
     population_size: int = 20,
     learning_rate: float = 0.01,
     seed: int = 7,
+    target_loss: float | None = None,
 ) -> tuple[np.ndarray, list[float], list[str], np.ndarray]:
     species_ids, targets = optimization.load_targets(str(targets_csv))
     print(f"Optimizing {len(tunable_params)} parameters to fit {len(species_ids)} targets...")
@@ -105,6 +121,7 @@ def run_optimize(
         iterations=iterations,
         population_size=population_size,
         seed=seed,
+        target_loss=target_loss,
     )
     log_results = dict(zip(tunable_params, np.log10(best_params)))
     optimization.write_optimized_params_to_sbml(str(sbml_path), log_results)
