@@ -3,12 +3,43 @@ from typing import List, Tuple
 import numpy as np
 import roadrunner
 import xml.etree.ElementTree as ET
-import matplotlib.pyplot as plt
 
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+# Default SBML path; the pipeline overrides this per run via optimization._SBML_PATH.
 _SBML_PATH = os.path.join(_HERE, "working_homo-sapiens", "R-HSA-1855192_augmented.sbml")
-_OPTIMIZED_SBML_PATH = os.path.join(_HERE, "working_homo-sapiens", "R-HSA-1855192_aug_optimized.sbml")
+
+
+# --- Parallel population evaluation -------------------------------------------
+# Each ES iteration evaluates population_size independent candidate parameter sets.
+# These are embarrassingly parallel: we farm them across worker processes, each
+# holding its own RoadRunner instance. The objective value of a candidate does not
+# depend on the others, so parallelism yields results identical to the serial path.
+
+_W = {}  # per-worker state (one RoadRunner per process)
+
+
+def _worker_init(sbml_path, parameter_ids, species_ids, targets, sim_start, sim_end):
+    # Build one RoadRunner per worker process and stash the fixed evaluation context.
+    _W["rr"] = roadrunner.RoadRunner(sbml_path)
+    _W["parameter_ids"] = parameter_ids
+    _W["species_ids"] = species_ids
+    _W["targets"] = np.asarray(targets, dtype=float)
+    _W["sim_start"] = sim_start
+    _W["sim_end"] = sim_end
+
+
+def _worker_eval(log_params):
+    # Evaluate one candidate using this worker's RoadRunner (same math as serial).
+    return objective_function(
+        _W["rr"],
+        log_params,
+        _W["parameter_ids"],
+        _W["species_ids"],
+        _W["targets"],
+        _W["sim_start"],
+        _W["sim_end"],
+    )
 
 
 def load_targets(path: str) -> Tuple[List[str], np.ndarray]:
@@ -125,11 +156,11 @@ def openai_es_minimize(
     beta1: float = 0.9,
     beta2: float = 0.999,
     eps_adam: float = 1e-8,
-    lr_decay: float = 0.995,
-    min_lr_frac: float = 0.5,
+    min_lr_frac: float = 0.3,  # lr floor as a fraction of learning_rate (cosine endpoint)
     sigma_decay: float = 0.999,
     min_sigma_frac: float = 0.2,
     target_loss: float | None = None,
+    n_workers: int = 1,
 ) -> tuple[np.ndarray, list[float]]:
 
     if population_size < 2:
@@ -141,6 +172,20 @@ def openai_es_minimize(
     half = population_size // 2
 
     rr = roadrunner.RoadRunner(_SBML_PATH)
+
+    # Optional process pool: each worker holds its own RoadRunner and evaluates a
+    # share of the population in parallel. Results are identical to the serial path
+    # (per-candidate objective is independent), only faster.
+    pool = None
+    if n_workers and n_workers > 1:
+        import multiprocessing as mp
+
+        pool = mp.get_context("fork").Pool(
+            processes=n_workers,
+            initializer=_worker_init,
+            initargs=(_SBML_PATH, parameter_ids, species_ids, targets, sim_start, sim_end),
+        )
+        print(f"Parallel ES: evaluating population across {n_workers} workers.")
 
     best_theta = theta.copy()
     best_f = objective_function(
@@ -159,7 +204,8 @@ def openai_es_minimize(
 
     min_sigma = sigma * min_sigma_frac
 
-    for step in range(1, iterations + 1):
+    try:
+      for step in range(1, iterations + 1):
 
         # Shrink the perturbation over time (floored) so the search explores widely
         # early and can fine-tune near the optimum instead of wandering away from it.
@@ -167,39 +213,24 @@ def openai_es_minimize(
 
         eps = rng.standard_normal((half, theta.size))
 
+        # Build the antithetic candidate list and the matching noise list, in order.
         all_noise = []
-        all_scores = []
-
+        candidates = []
         for e in eps:
-
-            theta_plus = theta + sigma_t * e
-            theta_minus = theta - sigma_t * e
-
-            f_plus = objective_function(
-                rr,
-                theta_plus,
-                parameter_ids,
-                species_ids,
-                targets,
-                sim_start,
-                sim_end
-            )
-
-            f_minus = objective_function(
-                rr,
-                theta_minus,
-                parameter_ids,
-                species_ids,
-                targets,
-                sim_start,
-                sim_end
-            )
-
             all_noise.append(e)
-            all_scores.append(-f_plus)
-
+            candidates.append(theta + sigma_t * e)
             all_noise.append(-e)
-            all_scores.append(-f_minus)
+            candidates.append(theta - sigma_t * e)
+
+        # Evaluate the whole population, in parallel when a pool is available.
+        if pool is not None:
+            fvals = pool.map(_worker_eval, candidates)
+        else:
+            fvals = [
+                objective_function(rr, c, parameter_ids, species_ids, targets, sim_start, sim_end)
+                for c in candidates
+            ]
+        all_scores = [-f for f in fvals]
 
         noise_mat = np.vstack(all_noise)
         scores = np.array(all_scores, dtype=float)
@@ -217,11 +248,16 @@ def openai_es_minimize(
         m_hat = m / (1 - beta1 ** step)
         v_hat = v / (1 - beta2 ** step)
 
-        # Geometric decay was tuned for ~60 iterations; over thousands of steps it
-        # drives lr to ~0 within a few hundred iters. Floor it at a fraction of the
-        # initial lr so the search keeps making progress for the whole budget.
+        # Cosine schedule spanning the whole iteration budget: lr glides smoothly
+        # from `learning_rate` (first step) down to `min_lr` (final step), regardless
+        # of how many iterations are run. This avoids the geometric decay's problem of
+        # collapsing to the floor within ~a hundred steps and then staying flat.
         min_lr = learning_rate * min_lr_frac
-        lr_t = max(learning_rate * (lr_decay ** (step - 1)), min_lr)
+        if iterations > 1:
+            cos = 0.5 * (1.0 + np.cos(np.pi * (step - 1) / (iterations - 1)))
+        else:
+            cos = 1.0
+        lr_t = min_lr + (learning_rate - min_lr) * cos
 
         theta += lr_t * m_hat / (np.sqrt(v_hat) + eps_adam)
 
@@ -254,6 +290,10 @@ def openai_es_minimize(
         if target_loss is not None and best_f <= target_loss:
             print(f"early stop at iter={step}: bestF={best_f:.6g} <= target_loss={target_loss:.6g}")
             break
+    finally:
+        if pool is not None:
+            pool.close()
+            pool.join()
 
     return 10 ** best_theta, history
 
@@ -302,51 +342,3 @@ def write_optimized_params_to_sbml(sbml_path, param_map):
         print(f"Error: Only found {updated_count}/{len(param_map)} parameters.")
         print(f"Missing IDs in SBML: {missing}")
         print("File was NOT saved.")
-
-
-if __name__ == '__main__':
-    rr_init = roadrunner.RoadRunner(_SBML_PATH) # initialize road runner
-
-    observable_species = rr_init.model.getFloatingSpeciesIds() # get the observable species
-    print(f"Species to optimize: {observable_species}") 
-
-    params_to_tune = ["log_K_in", "log_K_out", "log_lambda_1"]
-    print(f"Parameters to tune: {params_to_tune}")
-
-    species_ids, target_values = load_targets('./test.csv') # load the targets
-    print(target_values)
-
-    init_log_params = np.random.uniform(-6, 6, size=len(params_to_tune))
-    print(f"Initial log values: {init_log_params}")
-
-    print("\n--- Starting OpenAI-ES Optimization ---")
-
-    best_params, loss_history = openai_es_minimize(
-        init_log_params=init_log_params,
-        parameter_ids=params_to_tune,
-        species_ids=species_ids,
-        targets=target_values,
-        learning_rate=0.01,
-        sim_start=0.0,
-        sim_end=1000000,  
-        iterations=2000
-    )
-
-    print("\n--- Optimization Complete ---")
-    print(f"Final Best Loss: {loss_history[-1]:.6f}")
-    for name, value in zip(params_to_tune, best_params):
-        print(f"Optimized {name}: {value:.4f}")
-
-    # plot the Loss Curve
-    plt.figure(figsize=(10, 5))
-    plt.plot(loss_history, label="Objective Function $F$")
-    plt.yscale('log') 
-    plt.xlabel("Iteration")
-    plt.ylabel("Error (Mean Squared)")
-    plt.title("Optimization Progress (OpenAI-ES)")
-    plt.grid(True, which="both", ls="-", alpha=0.5)
-    plt.legend()
-    plt.show()
-
-    log_results = dict(zip(params_to_tune, np.log10(best_params)))
-    write_optimized_params_to_sbml(_SBML_PATH, log_results)

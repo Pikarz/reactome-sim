@@ -549,9 +549,14 @@ def inject_references(
     volume_by_compartment: dict[str, float],
     min_threshold: float = 1e-9,
 ) -> dict:
-    # Write the reference concentrations (Hill thresholds M and target means mu)
-    # and the compartment volumes obtained from the LLM/literature into an already
-    # augmented model. Run between target generation and optimization.
+    # Write the reference concentrations (Hill thresholds M and target means mu) into
+    # an already augmented model. Run between target generation and optimization.
+    #
+    # Compartment sizes are intentionally LEFT AT 1: we fit in concentration, not
+    # abundance. Baking realistic femtoliter volumes into the compartment sizes would
+    # scale species amounts down to ~1e-30 and make the ODE unintegrable. Volumes are
+    # preserved in the targets CSV and can be applied as a post-hoc relabel
+    # (abundance = concentration * volume) when abundances are needed for reporting.
     stats = {"m_set": 0, "mu_set": 0, "volumes_set": 0}
 
     # Per-species Hill threshold and target mean use the reference concentration.
@@ -575,15 +580,14 @@ def inject_references(
             mu_param.setValue(float(concentration_by_species[sid]))
             stats["mu_set"] += 1
 
-    # Compartment sizes carry the volume so RoadRunner converts concentration to
-    # abundance (amount = concentration * volume) consistently across the model.
-    for comp_id, volume in volume_by_compartment.items():
-        comp = model.getCompartment(comp_id)
-        if comp is None:
-            continue
-        comp.setSize(float(volume))
+    # Fit in concentration: pin every compartment size to 1 (not the real volume).
+    # Setting it explicitly also guards against an unset/NaN size, which makes
+    # RoadRunner produce NaN amounts and can crash the integrator. The real volume
+    # stays in the targets CSV for post-hoc abundance recovery.
+    for comp in model.getListOfCompartments():
+        comp.setSize(1.0)
         comp.setConstant(True)
-        stats["volumes_set"] += 1
+    _ = volume_by_compartment
 
     return stats
 

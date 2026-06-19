@@ -1,9 +1,10 @@
 """Scaling benchmark for the SBML pipeline: merge → augment → targets → optimize → simulate.
 
 Measures wall time, CPU time, peak RSS, and per-stage correctness across SBML
-inputs of increasing size. Caches LLM targets per scenario. Writes a flat
-output directory (no subfolders) with CSV, Markdown summary, JSON dump, and
-plots.
+inputs of increasing size. Caches LLM targets per scenario. Writes an output
+directory with reports/ (CSV, Markdown summary, JSON dump) and
+plots/{performance,optimization,simulation}/. Re-run with --replot to regenerate
+reports and figures from a previous run's saved data without re-optimizing.
 """
 
 from __future__ import annotations
@@ -33,22 +34,23 @@ import pipeline
 SCENARIOS = [
     # {
     #    "name": "small",
-    #    "file1": "working_homo-sapiens/R-HSA-1660508.sbml",
-    #    "file2": "working_homo-sapiens/R-HSA-1660537.sbml",
+    #    "file1": "homo_sapiens.3.1.sbml/R-HSA-1660508.sbml",
+    #    "file2": "homo_sapiens.3.1.sbml/R-HSA-1660537.sbml",
     # },
     {
          "name": "medium",
-         "file1": "working_homo-sapiens/R-HSA-1059683.sbml",
-        #     "file2": "working_homo-sapiens/R-HSA-109703.sbml",
+         "file1": "homo_sapiens.3.1.sbml/R-HSA-1059683.sbml",
+         "file2": "homo_sapiens.3.1.sbml/R-HSA-109703.sbml",
     },
+  #  large: 156 merged species, 214 tunable params
     # {
     #     "name": "large",
-    #     "file1": "homo_sapiens.3.1.sbml/R-HSA-109581.sbml",
-    #     "file2": "homo_sapiens.3.1.sbml/R-HSA-109582.sbml",
+    #     "file1": "homo_sapiens.3.1.sbml/R-HSA-111997.sbml",
+    #     "file2": "homo_sapiens.3.1.sbml/R-HSA-9855142.sbml",
     # },
 ]
 
-STAGE_ORDER = ["merge", "augment", "targets", "optimize", "simulate"]
+STAGE_ORDER = ["merge", "augment", "targets", "inject", "optimize", "simulate"]
 
 
 # Metrics dataclasses ---------------------------------------------------------
@@ -74,6 +76,7 @@ class ScenarioResult:
     merged_size_bytes: int = 0
     augmented_size_bytes: int = 0
     n_tunable_params: int = 0
+    n_workers: int = 1
     initial_loss: float = float("nan")
     final_loss: float = float("nan")
     stages: list = field(default_factory=list)
@@ -85,14 +88,47 @@ class ScenarioResult:
 
 # Resource sampling -----------------------------------------------------------
 
-def _read_rss_bytes() -> int:
-    """Read current process RSS from /proc (Linux). Returns 0 on platforms without procfs."""
+def _proc_rss_bytes(pid: int) -> int:
+    """RSS of a single process from /proc (Linux). 0 if unavailable."""
     try:
-        with open("/proc/self/statm") as h:
+        with open(f"/proc/{pid}/statm") as h:
             pages = int(h.read().split()[1])
         return pages * os.sysconf("SC_PAGE_SIZE")
     except Exception:
         return 0
+
+
+def _child_pids(pid: int) -> list[int]:
+    """Direct child PIDs of a process via /proc/<pid>/task/<tid>/children."""
+    kids: list[int] = []
+    try:
+        task_dir = f"/proc/{pid}/task"
+        for tid in os.listdir(task_dir):
+            try:
+                with open(f"{task_dir}/{tid}/children") as h:
+                    kids.extend(int(x) for x in h.read().split())
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return kids
+
+
+def _read_rss_bytes() -> int:
+    """Total RSS over the whole process tree (self + descendants), so the peak-memory
+    measurement remains correct when the optimize stage spawns parallel workers.
+    Returns 0 on platforms without procfs."""
+    total = 0
+    seen: set[int] = set()
+    stack = [os.getpid()]
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        total += _proc_rss_bytes(pid)
+        stack.extend(_child_pids(pid))
+    return total
 
 class _RssSampler(threading.Thread):
     def __init__(self, interval_s: float = 0.02):
@@ -244,8 +280,11 @@ def check_simulation(
     result: np.ndarray, species_ids: list[str], targets: np.ndarray, tol_rel: float
 ) -> tuple[bool, str, dict]:
     final = np.asarray(result)[-1, 1:]
+    # Floor must stay far below real targets: after the concentration*volume conversion
+    # abundances can be ~1e-7 or smaller, so a 1e-8 floor would understate the error of
+    # tiny targets and let a big miss pass the tolerance. Match the optimizer's floor.
     rel_errors = {
-        sid: float(abs(final[i] - targets[i]) / max(abs(targets[i]), 1e-8))
+        sid: float(abs(final[i] - targets[i]) / max(abs(targets[i]), 1e-12))
         for i, sid in enumerate(species_ids)
     }
     if not np.all(np.isfinite(final)):
@@ -263,14 +302,20 @@ def check_simulation(
 # Synthetic target fallback ---------------------------------------------------
 
 def _write_synthetic_targets(aug_path: Path, csv_path: Path, value: float = 0.5) -> list[str]:
-    """Write a uniform-target CSV so optimize/simulate can still be benchmarked when LLM fails."""
+    """Write a uniform-target CSV so optimize/simulate can still be benchmarked when LLM fails.
+
+    Uses the rich column layout (concentration/compartment/volume) so the downstream
+    reference-injection step can consume it just like a real LLM-generated CSV. With
+    volume=1 the abundance target equals the concentration value.
+    """
     model = libsbml.readSBML(str(aug_path)).getModel()
     sids = _floating_species_ids(model)
     with open(csv_path, "w", newline="") as h:
         w = csv.writer(h)
-        w.writerow(["species_id", "target_value"])
+        w.writerow(["species_id", "target_value", "concentration", "compartment", "volume"])
         for sid in sids:
-            w.writerow([sid, value])
+            comp = model.getSpecies(sid).getCompartment()
+            w.writerow([sid, value, value, comp, 1.0])
     return sids
 
 
@@ -289,6 +334,7 @@ def run_scenario(sc: dict, args, out_root: Path) -> ScenarioResult:
 
     file2 = sc.get("file2")
     res = ScenarioResult(name=name, file1=sc["file1"], file2=file2)
+    res.n_workers = getattr(args, "workers", 1)
     res.input_size_bytes = Path(sc["file1"]).stat().st_size
     if file2:
         res.input_size_bytes += Path(file2).stat().st_size
@@ -356,6 +402,22 @@ def run_scenario(sc: dict, args, out_root: Path) -> ScenarioResult:
         f"({res.stages[-1].wall_s:.2f}s)"
     )
     print(f"    (tunable_params={aug_stats.get('tunable_params', [])}, ")
+
+    # Inject the reference concentrations (Hill thresholds M) and compartment volumes
+    # from the targets CSV into the model, mirroring the main pipeline. Without this
+    # the augmented model keeps placeholder M=1 and unset volumes, so the optimization
+    # would run on a model that ignores points 1-3.
+    with stage("inject", res.stages) as box:
+        inj = pipeline.run_inject_references(aug_path, targets_csv)
+        box["ok"] = True
+        box["detail"] = (
+            f"M set={inj['m_set']}, mu set={inj['mu_set']}, volumes set={inj['volumes_set']}"
+        )
+    print(
+        f"  {'✓' if res.stages[-1].ok else '✗'} inject: {res.stages[-1].detail} "
+        f"({res.stages[-1].wall_s:.2f}s)"
+    )
+
     with stage("optimize", res.stages) as box:
         best_params, loss_history, species_ids, target_values = pipeline.run_optimize(
             aug_path,
@@ -365,6 +427,8 @@ def run_scenario(sc: dict, args, out_root: Path) -> ScenarioResult:
             iterations=args.iterations,
             population_size=args.population_size,
             learning_rate=args.learning_rate,
+            target_loss=(args.early_stop_loss if args.early_stop_loss > 0 else None),
+            n_workers=args.workers,
         )
         res.loss_history = [float(x) for x in loss_history]
         res.initial_loss = res.loss_history[0]
@@ -482,6 +546,42 @@ def write_markdown_summary(results: list[ScenarioResult], out_path: Path) -> Non
 _STAGE_COLORS = plt.get_cmap("viridis")(np.linspace(0.1, 0.9, len(STAGE_ORDER)))
 
 
+def _apply_plot_style() -> None:
+    """Paper-quality, scientific defaults for every figure: serif text with
+    Computer-Modern math, real LaTeX when the toolchain is available (falls back to
+    matplotlib mathtext otherwise), restrained grid, no top/right spines."""
+    plt.rcParams.update({
+        "figure.dpi": 120,
+        "savefig.dpi": 300,
+        "savefig.bbox": "tight",
+        "font.family": "serif",
+        "font.serif": ["CMU Serif", "DejaVu Serif", "Times New Roman"],
+        "mathtext.fontset": "cm",
+        "font.size": 10,
+        "axes.titlesize": 12,
+        "axes.titleweight": "normal",
+        "axes.labelsize": 11,
+        "axes.grid": True,
+        "axes.axisbelow": True,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "axes.linewidth": 0.8,
+        "grid.alpha": 0.25,
+        "grid.linewidth": 0.6,
+        "legend.fontsize": 8.5,
+        "legend.framealpha": 0.95,
+        "legend.edgecolor": "0.8",
+        "xtick.direction": "in",
+        "ytick.direction": "in",
+        "xtick.minor.visible": True,
+        "ytick.minor.visible": True,
+    })
+    # We deliberately keep matplotlib's mathtext (Computer-Modern) rather than a real
+    # LaTeX backend: it renders the same paper-style math without depending on a
+    # latex/dvipng install and without needing to escape % or underscores that appear
+    # in dynamic labels (e.g. species ids).
+
+
 def _annotate_bars(ax, bars, values, fmt="{:.2f}"):
     for bar, v in zip(bars, values):
         if v <= 0:
@@ -529,70 +629,112 @@ def _grouped_bar(results, attr: str, ylabel: str, title: str, out_path: Path,
 
 
 def plot_loss_curves(results: list[ScenarioResult], out_path: Path) -> None:
-    fig, ax = plt.subplots(figsize=(10, 5.5))
+    fig, ax = plt.subplots(figsize=(11, 6))
     cmap = plt.get_cmap("plasma")
     for i, r in enumerate(results):
         if not r.loss_history:
             continue
-        ax.plot(
-            r.loss_history,
-            label=f"{r.name}  (n_species={r.merged_n_species}, final={r.final_loss:.3g})",
-            color=cmap(0.15 + 0.7 * i / max(1, len(results) - 1)),
-            linewidth=1.8,
-            alpha=0.9,
-        )
+        color = cmap(0.12 + 0.7 * i / max(1, len(results) - 1))
+        hist = r.loss_history
+        n = len(hist)
+        # Plot the per-iteration loss faintly, plus the running-best as a bold line so
+        # the actual convergence (what the optimizer keeps) reads clearly through noise.
+        running_best = np.minimum.accumulate(hist)
+        ax.plot(hist, color=color, linewidth=0.8, alpha=0.25)
+        ax.plot(running_best, color=color, linewidth=2.2, alpha=0.95,
+                label=f"{r.name}  (species={r.merged_n_species}, "
+                      f"best={min(hist):.2g}, stopped@{n})")
+        # Mark the best point reached.
+        bi = int(np.argmin(hist))
+        ax.scatter([bi], [hist[bi]], color=color, s=45, zorder=5,
+                   edgecolor="black", linewidth=0.6)
+
     ax.set_yscale("log")
     ax.set_xlabel("Iteration")
-    ax.set_ylabel("Loss (log scale, relative squared error)")
-    ax.set_title("Optimization convergence (OpenAI-ES)")
-    ax.legend(loc="upper right", framealpha=0.9)
+    ax.set_ylabel("Loss — Σ (log₁₀ sim − log₁₀ target)²  (log scale)")
+    ax.set_title("Optimization convergence (OpenAI-ES)\nfaint = per-iteration loss, bold = running best")
+    ax.legend(loc="upper right", title="Scenario")
     ax.grid(True, which="both", alpha=0.3)
     plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
+    plt.savefig(out_path)
     plt.close()
+
+
+def _log_errors(targets: dict, final_state: dict):
+    """Aligned arrays (species, target, simulated, |log10 dex error|)."""
+    sids = list(targets)
+    tg = np.array([targets[s] for s in sids], dtype=float)
+    fs = np.array([final_state.get(s, np.nan) for s in sids], dtype=float)
+    le = np.abs(np.log10(np.maximum(fs, 1e-30)) - np.log10(np.maximum(tg, 1e-30)))
+    return sids, tg, fs, le
 
 
 def plot_final_errors(results: list[ScenarioResult], out_path: Path) -> None:
-    plottable = [r for r in results if r.targets]
+    """Fit quality across ALL species: (A) simulated-vs-target scatter on log-log
+    axes with a +/-1 dex band, and (B) the ECDF of per-species log-error."""
+    plottable = [r for r in results if r.targets and r.final_state]
     if not plottable:
         return
-    fig, axes = plt.subplots(
-        nrows=len(plottable), ncols=1, figsize=(11, 3.5 * len(plottable))
-    )
-    if len(plottable) == 1:
-        axes = [axes]
-    for ax, r in zip(axes, plottable):
-        sids = sorted(r.targets, key=lambda x: r.targets[x], reverse=True)
-        # When dimensionality is large, plot the top N most-mismatched species.
-        max_show = 30
-        errs_full = {
-            sid: abs(r.final_state.get(sid, float("nan")) - r.targets[sid])
-            / max(abs(r.targets[sid]), 1e-8)
-            for sid in sids
-        }
-        sorted_by_err = sorted(sids, key=lambda s: errs_full[s], reverse=True)[:max_show]
-        errs = [errs_full[sid] for sid in sorted_by_err]
-        bars = ax.bar(
-            range(len(sorted_by_err)), errs,
-            color=["#d62728" if e > 0.3 else "#2ca02c" for e in errs],
-            edgecolor="black", linewidth=0.3,
-        )
-        ax.axhline(0.3, linestyle="--", color="grey", alpha=0.6, label="tol_rel=0.3")
-        ax.set_xticks(range(len(sorted_by_err)))
-        ax.set_xticklabels(sorted_by_err, rotation=70, ha="right", fontsize=7)
-        title_suffix = " (synthetic targets)" if r.targets_synthetic else ""
-        ax.set_title(f"{r.name}{title_suffix} — top-{len(sorted_by_err)} species by relative error")
-        ax.set_ylabel("Relative error")
-        ax.set_yscale("log") if max(errs, default=0) > 10 else None
-        ax.grid(True, axis="y", which="both", alpha=0.3)
-        ax.legend(loc="upper right", fontsize=8)
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
-    plt.close()
+    n = len(plottable)
+    fig, axes = plt.subplots(n, 2, figsize=(10.5, 4.3 * n), layout="constrained", squeeze=False)
+
+    for row, r in enumerate(plottable):
+        _, tg, fs, le = _log_errors(r.targets, r.final_state)
+        m = np.isfinite(tg) & np.isfinite(fs)
+        tgm, fsm, lem = tg[m], fs[m], le[m]
+        suffix = " (synthetic targets)" if r.targets_synthetic else ""
+
+        # ---- (A) simulated vs target, log-log ----
+        axA = axes[row, 0]
+        lo = max(min(tgm.min(), fsm[fsm > 0].min() if np.any(fsm > 0) else tgm.min()) * 0.3, 1e-30)
+        hi = max(tgm.max(), fsm.max()) * 3
+        diag = np.array([lo, hi])
+        axA.fill_between(diag, diag / 10, diag * 10, color="0.85", alpha=0.7, lw=0,
+                         label=r"$\pm 1$ dex")
+        axA.plot(diag, diag, color="0.30", ls="--", lw=1.0, label=r"$y = x$")
+        sc = axA.scatter(tgm, np.maximum(fsm, lo), c=lem, cmap="viridis", vmin=0, vmax=2,
+                         s=20, edgecolor="black", linewidth=0.2, zorder=3)
+        axA.set_xscale("log"); axA.set_yscale("log")
+        axA.set_xlim(lo, hi); axA.set_ylim(lo, hi)
+        axA.set_xlabel("Target concentration (a.u.)")
+        axA.set_ylabel("Simulated steady state (a.u.)")
+        axA.set_title(f"{r.name}{suffix}: simulated vs. target ({m.sum()} species)")
+        axA.legend(loc="upper left")
+        cb = fig.colorbar(sc, ax=axA, fraction=0.046, pad=0.02)
+        cb.set_label(r"$|\log_{10}(\mathrm{sim}/\mathrm{target})|$  (dex)")
+
+        # ---- (B) ECDF of per-species log-error ----
+        axB = axes[row, 1]
+        e = np.sort(lem)
+        y = np.arange(1, e.size + 1) / e.size
+        axB.step(e, y, where="post", color="#08306b", lw=1.8)
+        axB.fill_between(e, 0, y, step="post", color="#4c78a8", alpha=0.15)
+        lines = []
+        for thr, c in ((0.5, "#2ca02c"), (1.0, "#d62728")):
+            frac = float((lem <= thr).mean())
+            axB.axvline(thr, color=c, ls=":", lw=1.2)
+            lines.append((f"$\\leq {thr:g}$ dex:  {frac * 100:.0f}%", c))
+        # Compact stats box (bottom-right), one coloured line per threshold.
+        for k, (txt, c) in enumerate(lines):
+            axB.text(0.97, 0.10 + 0.08 * k, txt, transform=axB.transAxes,
+                     color=c, fontsize=9, ha="right", va="bottom")
+        axB.set_xlim(0, max(2.0, float(e.max())))
+        axB.set_ylim(0, 1.02)
+        axB.set_xlabel(r"Per-species error  $|\log_{10}(\mathrm{sim}/\mathrm{target})|$  (dex)")
+        axB.set_ylabel("Cumulative fraction of species")
+        axB.set_title(f"{r.name}{suffix}: error distribution (median {np.median(lem):.2f} dex)")
+
+    fig.savefig(out_path)
+    plt.close(fig)
 
 
-def plot_simulation_trajectories(results: list[ScenarioResult], out_root: Path) -> None:
-    """One PNG per scenario: species trajectories + dashed target horizontal lines."""
+def plot_simulation_trajectories(
+    results: list[ScenarioResult], out_root: Path, max_species: int = 60
+) -> None:
+    """Per-scenario time-course of the optimized model: one line per species with its
+    target marked. Only emitted for scenarios small enough to read (<= max_species);
+    larger merges have too many overlapping trajectories to be legible and are
+    skipped (their convergence is summarized by the optimization plots instead)."""
     for r in results:
         time = getattr(r, "sim_time", None)
         traj = getattr(r, "sim_trajectories", None)
@@ -600,31 +742,47 @@ def plot_simulation_trajectories(results: list[ScenarioResult], out_root: Path) 
         tgts = getattr(r, "sim_targets", None)
         if time is None or traj is None or not sids:
             continue
-        max_show = 30
-        # Pick species with largest final-value range — most visually informative.
-        order = sorted(range(len(sids)), key=lambda i: abs(traj[-1, i]), reverse=True)[:max_show]
-        cmap = plt.get_cmap("tab20")
-        fig, ax = plt.subplots(figsize=(11, 6))
-        for plot_i, i in enumerate(order):
-            color = cmap(plot_i % 20)
-            ax.plot(time, traj[:, i], color=color, linewidth=1.2, alpha=0.85, label=sids[i])
-            ax.axhline(tgts[i], color=color, linestyle="--", linewidth=0.7, alpha=0.5)
+        n = len(sids)
+        if n > max_species:
+            print(f"  simulation plot skipped for {r.name}: {n} species > {max_species} (too dense)")
+            continue
+
+        time = np.asarray(time, dtype=float)
+        traj = np.asarray(traj, dtype=float)
+        tg = np.asarray(tgts, dtype=float)
+        suffix = " (synthetic targets)" if r.targets_synthetic else ""
+
+        # Plot each species relative to its own target. This removes the 8+ decade
+        # spread of absolute values (so trajectories no longer "all look the same"
+        # rising from ~0) and replaces a column of overlapping target markers with a
+        # single reference line at 1: every well-fit species settles onto it.
+        ratio = np.maximum(traj, 1e-30) / np.maximum(tg[None, :], 1e-30)
+
+        fig, ax = plt.subplots(figsize=(10, 6), layout="constrained")
+        colors = plt.get_cmap("viridis")(np.linspace(0.05, 0.95, n))
+        for i in range(n):
+            ax.plot(time, ratio[:, i], color=colors[i], lw=1.3, alpha=0.9, label=sids[i])
+        ax.axhline(1.0, color="#d62728", ls="--", lw=1.5, zorder=6, label="target")
+
+        ax.set_yscale("log")
         ax.set_xlabel("Time")
-        ax.set_ylabel("Concentration")
-        title_suffix = " (synthetic targets)" if r.targets_synthetic else ""
-        ax.set_title(
-            f"{r.name}{title_suffix} — final simulation "
-            f"(top-{len(order)}/{len(sids)} species; dashed = target)"
-        )
-        if np.nanmax(np.abs(traj)) > 0:
-            pos = traj[traj > 0]
-            if pos.size and np.nanmax(traj) / max(np.nanmin(pos), 1e-12) > 100:
-                ax.set_yscale("log")
-        ax.grid(True, which="both", alpha=0.3)
-        ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=7, ncol=1)
-        plt.tight_layout()
-        plt.savefig(out_root / f"{r.name}_simulation.png", dpi=150, bbox_inches="tight")
-        plt.close()
+        ax.set_ylabel(r"Simulated / target,  $x_i(t)\,/\,\mu_i$")
+        ax.set_title(f"{r.name}{suffix}: convergence to target ({n} species)")
+        # Focus the y-view on the convergence band around 1 (the deep t=0 transient,
+        # where ratio starts near 0, falls off the bottom).
+        fr = ratio[-1, :]
+        lo = min(fr.min(), 0.1)
+        hi = max(fr.max(), 10.0)
+        ax.set_ylim(lo / 2.0, hi * 2.0)
+        # Legend only when it stays readable.
+        if n <= 30:
+            ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5),
+                      fontsize=7, ncol=1 + n // 16, title="Species")
+        else:
+            ax.legend(loc="upper right", handles=[ax.lines[-1]])  # just the target line
+
+        fig.savefig(out_root / f"{r.name}_simulation.png")
+        plt.close(fig)
 
 
 def plot_scaling(results: list[ScenarioResult], out_path: Path) -> None:
@@ -673,10 +831,69 @@ def _clean_output_dir(out_root: Path) -> None:
 
 # Entry point -----------------------------------------------------------------
 
+def load_results(out_root: Path) -> list[ScenarioResult]:
+    """Reconstruct ScenarioResult objects from a previous run's saved artifacts
+    (reports/results.json + per-scenario *_simulation.npz), so plots and reports
+    can be regenerated without re-running the (expensive) pipeline."""
+    json_path = out_root / "reports" / "results.json"
+    if not json_path.exists():
+        raise FileNotFoundError(
+            f"No saved results at {json_path}; run the benchmark once before --replot."
+        )
+    data = json.loads(json_path.read_text())
+    results: list[ScenarioResult] = []
+    for d in data:
+        stages = [StageMetric(**s) for s in d.pop("stages", [])]
+        r = ScenarioResult(**d)
+        r.stages = stages
+        # Trajectory arrays live in the npz sidecar, not the JSON.
+        npz = out_root / f"{r.name}_simulation.npz"
+        if npz.exists():
+            z = np.load(npz, allow_pickle=True)
+            r.sim_time = z["time"]
+            r.sim_trajectories = z["trajectories"]
+            r.sim_species_ids = [str(s) for s in z["species_ids"]]
+            r.sim_targets = z["targets"]
+        results.append(r)
+    return results
+
+
+def write_outputs(results: list[ScenarioResult], out_root: Path) -> None:
+    """Persist the raw results, then (re)generate every report and plot."""
+    reports_dir = out_root / "reports"
+    perf_dir = out_root / "plots" / "performance"
+    opt_dir = out_root / "plots" / "optimization"
+    sim_dir = out_root / "plots" / "simulation"
+    for d in (reports_dir, perf_dir, opt_dir, sim_dir):
+        d.mkdir(parents=True, exist_ok=True)
+
+    # Persist raw data first so a later plotting error never loses the run.
+    (reports_dir / "results.json").write_text(
+        json.dumps(
+            [{**asdict(r), "stages": [asdict(s) for s in r.stages]} for r in results],
+            indent=2,
+            default=str,
+        )
+    )
+    write_csv_report(results, reports_dir / "results.csv")
+    write_markdown_summary(results, reports_dir / "summary.md")
+
+    _grouped_bar(results, "wall_s", "Wall time (s, log scale)",
+                 "Stage wall time per scenario", perf_dir / "time_per_stage.png",
+                 logy=True, fmt="{:.2f}s")
+    _grouped_bar(results, "peak_rss_mb", "Peak RSS (MB, log scale)",
+                 "Stage peak memory per scenario", perf_dir / "ram_per_stage.png",
+                 logy=True, fmt="{:.0f}")
+    plot_scaling(results, perf_dir / "scaling.png")
+    plot_loss_curves(results, opt_dir / "loss_curves.png")
+    plot_final_errors(results, opt_dir / "final_errors.png")
+    plot_simulation_trajectories(results, sim_dir)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--output-dir", default="bench_out", help="Flat output directory")
-    ap.add_argument("--llm-model", default="llama3.2:3b", help="Ollama model for target generation")
+    ap.add_argument("--llm-model", default="llama3.1:8b", help="Ollama model for target generation")
     ap.add_argument("--sim-end", type=float, default=100000.0,
                     help="Simulation horizon used during optimization")
     ap.add_argument("--iterations", type=int, default=5000, help="OpenAI-ES iterations")
@@ -684,45 +901,41 @@ def main() -> None:
                     help="OpenAI-ES population size")
     ap.add_argument("--learning-rate", type=float, default=0.01,
                     help="OpenAI-ES learning rate")
+    ap.add_argument("--early-stop-loss", type=float, default=1e-4,
+                    help="Stop optimization early once best loss drops to/below this "
+                         "(set <=0 to disable and always run the full iteration budget)")
     ap.add_argument("--tol-rel", type=float, default=0.3,
                     help="Relative error tolerance for the simulation correctness check")
     ap.add_argument("--fallback-target", type=float, default=0.5,
                     help="Synthetic target value used when the LLM step fails")
     ap.add_argument("--skip-merge", action="store_true",
                     help="Skip merge and use file1 directly (useful for single inputs)")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="Parallel worker processes for ES population evaluation "
+                         "(1 = serial; e.g. set to the number of CPU cores). Results "
+                         "are identical to serial, only faster.")
+    ap.add_argument("--replot", action="store_true",
+                    help="Skip the pipeline; regenerate all reports and plots from a "
+                         "previous run's saved data (reports/results.json + *_simulation.npz)")
     args = ap.parse_args()
 
     out_root = Path(args.output_dir)
     out_root.mkdir(parents=True, exist_ok=True)
-    _clean_output_dir(out_root)
+    _apply_plot_style()
 
-    results = [run_scenario(sc, args, out_root) for sc in SCENARIOS]
+    if args.replot:
+        print(f"Reloading saved results from {out_root}/ and regenerating outputs...")
+        results = load_results(out_root)
+    else:
+        _clean_output_dir(out_root)
+        results = [run_scenario(sc, args, out_root) for sc in SCENARIOS]
 
-    write_csv_report(results, out_root / "results.csv")
-    write_markdown_summary(results, out_root / "summary.md")
-    _grouped_bar(results, "wall_s", "Wall time (s, log scale)",
-                 "Stage wall time per scenario", out_root / "time_per_stage.png",
-                 logy=True, fmt="{:.2f}s")
-    _grouped_bar(results, "peak_rss_mb", "Peak RSS (MB, log scale)",
-                 "Stage peak memory per scenario", out_root / "ram_per_stage.png",
-                 logy=True, fmt="{:.0f}")
-    plot_loss_curves(results, out_root / "loss_curves.png")
-    plot_final_errors(results, out_root / "final_errors.png")
-    plot_simulation_trajectories(results, out_root)
-    plot_scaling(results, out_root / "scaling.png")
-
-    (out_root / "results.json").write_text(
-        json.dumps(
-            [{**asdict(r), "stages": [asdict(s) for s in r.stages]} for r in results],
-            indent=2,
-            default=str,
-        )
-    )
+    write_outputs(results, out_root)
 
     print(f"\n✓ Reports written under {out_root}/")
-    for p in sorted(out_root.glob("*")):
+    for p in sorted(out_root.rglob("*")):
         if p.is_file():
-            print(f"  {p.name}")
+            print(f"  {p.relative_to(out_root)}")
 
 
 if __name__ == "__main__":

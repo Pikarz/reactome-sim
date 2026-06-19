@@ -232,71 +232,174 @@ def parse_sbml(sbml_path: str) -> dict[str, Any]:
     }
 
 
-def build_prompt(sbml_data: dict[str, Any]) -> str:
-    model = sbml_data["model_info"]
-    species = sbml_data["species"]
-    compartments = sbml_data.get("compartments", [])
-
-    pathway_name = _clean_text(model.get("model_name", "")) or model.get("model_id", "unknown_pathway")
-
-    # Compact per-species summary keeps prompt within model context even for
-    # pathways with hundreds of species. Full SBML JSON would blow context.
-    species_table = []
-    for s in species:
-        species_table.append({
+def build_concentration_prompt(pathway_name: str, species_subset: list[dict[str, Any]]) -> str:
+    # Ask only for per-species concentrations, for one chunk of species. Keeping the
+    # request small (a few dozen species) keeps the JSON output within the model's
+    # reliable generation length so it does not truncate into invalid JSON.
+    table = [
+        {
             "species_id": s["species_id"],
             "name": _clean_text(s.get("name", "")),
             "compartment": s.get("compartment", ""),
-            "initial_amount": s.get("initial_amount"),
-            "initial_concentration": s.get("initial_concentration"),
-        })
-
-    # Compartment summary lets the LLM supply a physical volume for each one.
-    compartment_table = [
-        {"compartment_id": c.get("id", ""), "name": _clean_text(c.get("name", ""))}
-        for c in compartments
+        }
+        for s in species_subset
     ]
-
-    species_json = json.dumps(species_table, ensure_ascii=False)
-    compartment_json = json.dumps(compartment_table, ensure_ascii=False)
-    species_ids = [s["species_id"] for s in species]
-    species_list_preview = ", ".join(species_ids[:20]) + (
-        f", ... (+{len(species_ids) - 20} more)" if len(species_ids) > 20 else ""
-    )
-
     prompt = f"""
-        For pathway "{pathway_name}", provide two things from biological literature:
-        1. A realistic MEAN steady-state CONCENTRATION (in mM, i.e. mmol/L) for each molecular species.
-        2. A realistic physical VOLUME (in litres, L) for each cellular compartment.
-
-        Species: {species_list_preview}
+        For pathway "{pathway_name}", provide a realistic MEAN steady-state CONCENTRATION
+        (in mM, i.e. mmol/L) for each molecular species listed below.
 
         Output rules (mandatory):
         - Reply ONLY with valid JSON, no extra text.
         - Format:
         {{
-        "pathway": "{pathway_name}",
-        "compartments": [
-            {{"compartment_id": "<id>", "volume_litres": <number>}},
-            ...
-        ],
         "targets": [
             {{"species_id": "<id>", "concentration": <number>}},
             ...
         ]
         }}
-        - Include EXACTLY one entry for EACH species_id and EACH compartment_id below.
+        - Include EXACTLY one entry for EACH species_id below.
         - concentration must be a finite real number >= 0 (mean concentration in mM).
-        - volume_litres must be a finite real number > 0 (compartment volume in L).
-        - Do not invent ids that are not in the lists.
+        - Do not invent species ids that are not in the list.
 
         Species list (compact JSON):
-        {species_json}
-
-        Compartment list (compact JSON):
-        {compartment_json}
+        {json.dumps(table, ensure_ascii=False)}
     """
     return textwrap.dedent(prompt).strip()
+
+
+def build_volume_prompt(pathway_name: str, compartments: list[dict[str, Any]]) -> str:
+    # Ask only for compartment volumes (there are typically only a handful).
+    table = [
+        {"compartment_id": c.get("id", ""), "name": _clean_text(c.get("name", ""))}
+        for c in compartments
+    ]
+    prompt = f"""
+        For pathway "{pathway_name}", provide a realistic physical VOLUME (in litres, L)
+        for each cellular compartment listed below.
+
+        Output rules (mandatory):
+        - Reply ONLY with valid JSON, no extra text.
+        - Format:
+        {{
+        "compartments": [
+            {{"compartment_id": "<id>", "volume_litres": <number>}},
+            ...
+        ]
+        }}
+        - Include EXACTLY one entry for EACH compartment_id below.
+        - volume_litres must be a finite real number > 0 (compartment volume in L).
+        - Do not invent ids that are not in the list.
+
+        Compartment list (compact JSON):
+        {json.dumps(table, ensure_ascii=False)}
+    """
+    return textwrap.dedent(prompt).strip()
+
+
+def _pathway_name(sbml_data: dict[str, Any]) -> str:
+    model = sbml_data["model_info"]
+    return _clean_text(model.get("model_name", "")) or model.get("model_id", "unknown_pathway")
+
+
+def _llm_request_with_retry(prompt: str, model: str, temperature: float, validate, retries: int = 3):
+    # LLM output is stochastic: a chunk occasionally returns malformed JSON or a
+    # missing id. Retry a few times before giving up so one bad response does not
+    # abort the whole (multi-chunk) generation.
+    last_exc: Exception | None = None
+    for _ in range(retries):
+        try:
+            text = call_ollama(prompt, model, temperature)
+            return validate(extract_json_from_text(text))
+        except Exception as exc:  # malformed JSON, missing ids, etc.
+            last_exc = exc
+    raise RuntimeError(f"LLM request failed after {retries} attempts: {last_exc}")
+
+
+def _parse_concentrations_lenient(text: str, allowed_ids: set[str]) -> dict[str, float]:
+    # Extract whatever valid {species_id: concentration} pairs are present for the
+    # allowed ids, ignoring malformed/missing/extra entries instead of raising. Used
+    # by the chunked generator so a single imperfect response is not fatal.
+    out: dict[str, float] = {}
+    try:
+        data = extract_json_from_text(text)
+    except Exception:
+        return out
+    for item in data.get("targets", []) if isinstance(data, dict) else []:
+        if not isinstance(item, dict):
+            continue
+        sid = item.get("species_id")
+        val = item.get("concentration", item.get("target_value"))
+        if sid in allowed_ids and val is not None:
+            try:
+                v = float(val)
+            except (TypeError, ValueError):
+                continue
+            if v >= 0:
+                out[str(sid)] = v
+    return out
+
+
+def _request_concentrations(pathway, species_subset, model, temperature, attempts=2):
+    # Ask the LLM for one chunk; tolerantly collect valid values across a couple of
+    # attempts (each attempt may fill in ids the previous one missed).
+    ids = {s["species_id"] for s in species_subset}
+    got: dict[str, float] = {}
+    for _ in range(attempts):
+        prompt = build_concentration_prompt(pathway, species_subset)
+        got.update(_parse_concentrations_lenient(call_ollama(prompt, model, temperature), ids))
+        if ids.issubset(got):
+            break
+    return got
+
+
+def generate_targets_chunked(
+    sbml_data: dict[str, Any],
+    model: str,
+    temperature: float = 0.2,
+    chunk_size: int = 30,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Query the LLM for concentrations in small species chunks (and volumes once),
+    then merge. Large models otherwise emit a single oversized JSON that truncates
+    into 'no targets list'. Tolerant: stragglers the LLM keeps omitting are retried,
+    then filled with the median of the obtained values rather than aborting the run.
+    Returns (concentration_by_species, volume_by_compartment)."""
+    pathway = _pathway_name(sbml_data)
+    species = sbml_data["species"]
+    compartments = sbml_data["compartments"]
+
+    # 1) Compartment volumes — a single small request (strict, with retry).
+    volume_map = _llm_request_with_retry(
+        build_volume_prompt(pathway, compartments), model, temperature,
+        lambda js: validate_volumes(js, [c["id"] for c in compartments]),
+    )
+
+    # 2) Species concentrations — chunked, accumulated tolerantly.
+    concentration_map: dict[str, float] = {}
+    n_chunks = (len(species) + chunk_size - 1) // chunk_size
+    for ci in range(n_chunks):
+        chunk = species[ci * chunk_size : (ci + 1) * chunk_size]
+        concentration_map.update(_request_concentrations(pathway, chunk, model, temperature))
+        print(f"  targets chunk {ci + 1}/{n_chunks}: {len(concentration_map)}/{len(species)} so far")
+
+    # 3) One cleanup pass over any species still missing.
+    missing = [s for s in species if s["species_id"] not in concentration_map]
+    if missing:
+        for ci in range(0, len(missing), chunk_size):
+            concentration_map.update(
+                _request_concentrations(pathway, missing[ci : ci + chunk_size], model, temperature)
+            )
+
+    # 4) Fill any remaining holes with the median so generation never aborts.
+    still_missing = [s["species_id"] for s in species if s["species_id"] not in concentration_map]
+    if still_missing:
+        import statistics
+
+        fallback = statistics.median(concentration_map.values()) if concentration_map else 0.5
+        print(f"  WARNING: LLM omitted {len(still_missing)} species; filling with median={fallback:g}")
+        for sid in still_missing:
+            concentration_map[sid] = float(fallback)
+
+    return concentration_map, volume_map
 
 
 def call_ollama(prompt: str, model: str, temperature: float) -> str:
@@ -431,8 +534,13 @@ def build_target_rows(
     concentration_by_species: dict[str, float],
     volume_by_compartment: dict[str, float],
 ) -> list[tuple[str, float, float, str, float]]:
-    # Convert each species' mean concentration to an abundance (the quantity the
-    # simulator reports for a plain species id) via abundance = concentration * volume.
+    # We fit in CONCENTRATION: the optimization target is the species concentration
+    # itself, not concentration * volume. The kinetic laws already operate on
+    # concentrations, so fitting concentrations is the natural quantity and keeps the
+    # ODE numerically stable. (Realistic femtoliter volumes would otherwise crush the
+    # abundances to ~1e-30 and crash the integrator.) The compartment volume is still
+    # recorded per row as provenance, so an abundance can be recovered downstream at
+    # any time via abundance = concentration * volume.
     rows: list[tuple[str, float, float, str, float]] = []
     for s in species:
         sid = s["species_id"]
@@ -441,8 +549,8 @@ def build_target_rows(
         comp = s.get("compartment", "")
         volume = volume_by_compartment.get(comp, 1.0)
         concentration = concentration_by_species[sid]
-        abundance = concentration * volume
-        rows.append((sid, abundance, concentration, comp, volume))
+        # target_value == concentration (volume kept only for provenance/recovery).
+        rows.append((sid, concentration, concentration, comp, volume))
     return rows
 
 
@@ -544,28 +652,27 @@ def main() -> int:
     )
 
     sbml_data = parse_sbml(args.sbml)
-    prompt = build_prompt(sbml_data)
+    pathway = _pathway_name(sbml_data)
 
+    # Preview the prompts that would be sent (volume request + first species chunk).
+    preview = (
+        build_volume_prompt(pathway, sbml_data["compartments"])
+        + "\n\n# --- example species chunk ---\n"
+        + build_concentration_prompt(pathway, sbml_data["species"][:30])
+    )
     with open(prompt_output_path, "w", encoding="utf-8") as handle:
-        handle.write(prompt)
+        handle.write(preview)
 
     if args.dry_run:
-        print(prompt)
-        print("\n[DRY RUN] Prompt generated. No API call was performed.")
+        print(preview)
+        print("\n[DRY RUN] Prompts generated. No API call was performed.")
         print(f"Prompt saved to: {prompt_output_path}")
         return 0
 
-    model_response_text = call_ollama(
-        prompt=prompt,
-        model=args.model,
-        temperature=args.temperature,
+    # Chunked generation: concentrations a few dozen species at a time, volumes once.
+    concentration_map, volume_map = generate_targets_chunked(
+        sbml_data, args.model, temperature=args.temperature
     )
-    response_json = extract_json_from_text(model_response_text)
-
-    expected_species_ids = [s["species_id"] for s in sbml_data["species"]]
-    expected_compartment_ids = [c["id"] for c in sbml_data["compartments"]]
-    concentration_map = validate_concentrations(response_json, expected_species_ids)
-    volume_map = validate_volumes(response_json, expected_compartment_ids)
     rows = build_target_rows(sbml_data["species"], concentration_map, volume_map)
 
     write_csv(rows, output_csv_path)

@@ -216,4 +216,5 @@ bench_out/
 working_homo-sapiens/
 
 report/
-bench_out_*
+bench_*
+paper/
