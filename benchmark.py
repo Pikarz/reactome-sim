@@ -32,16 +32,16 @@ import pipeline
 # Hardcoded scaling scenarios. Each pair was checked for ≥1 shared species so the
 # merge step is non-trivial. Ordered by combined input size (ascending).
 SCENARIOS = [
-    # {
-    #    "name": "small",
-    #    "file1": "homo_sapiens.3.1.sbml/R-HSA-1660508.sbml",
-    #    "file2": "homo_sapiens.3.1.sbml/R-HSA-1660537.sbml",
-    # },
     {
-         "name": "medium",
-         "file1": "homo_sapiens.3.1.sbml/R-HSA-1059683.sbml",
-         "file2": "homo_sapiens.3.1.sbml/R-HSA-109703.sbml",
+       "name": "small",
+       "file1": "homo_sapiens.3.1.sbml/R-HSA-1660508.sbml",
+       "file2": "homo_sapiens.3.1.sbml/R-HSA-1660537.sbml",
     },
+    # {
+    #      "name": "medium",
+    #      "file1": "homo_sapiens.3.1.sbml/R-HSA-1059683.sbml",
+    #      "file2": "homo_sapiens.3.1.sbml/R-HSA-109703.sbml",
+    # },
   #  large: 156 merged species, 214 tunable params
     # {
     #     "name": "large",
@@ -785,6 +785,60 @@ def plot_simulation_trajectories(
         plt.close(fig)
 
 
+def plot_simulation_combined(
+    results: list[ScenarioResult], out_path: Path, max_individual: int = 40
+) -> None:
+    """Unified convergence view across all scenarios in one figure: one panel per
+    scenario showing every species' trajectory normalized by its target (sim/target),
+    summarized as a median curve with 25-75% and 10-90% ribbons, plus faint individual
+    traces when few enough to read. A shared y-axis and the common reference line at 1
+    let the small, medium, and large models be compared on equal footing regardless of
+    species count."""
+    plottable = [
+        r for r in results
+        if getattr(r, "sim_time", None) is not None
+        and getattr(r, "sim_trajectories", None) is not None
+        and getattr(r, "sim_species_ids", None)
+    ]
+    if not plottable:
+        return
+    plottable = sorted(plottable, key=lambda r: r.merged_n_species)
+    k = len(plottable)
+
+    fig, axes = plt.subplots(1, k, figsize=(3.7 * k, 3.6), layout="constrained",
+                             sharey=True, squeeze=False)
+    axes = axes[0]
+    for ax, r in zip(axes, plottable):
+        time = np.asarray(r.sim_time, dtype=float)
+        traj = np.asarray(r.sim_trajectories, dtype=float)
+        tg = np.asarray(r.sim_targets, dtype=float)
+        ratio = np.maximum(traj, 1e-30) / np.maximum(tg[None, :], 1e-30)
+        ns = ratio.shape[1]
+
+        if ns <= max_individual:
+            ax.plot(time, ratio, color="0.55", lw=0.4, alpha=0.30, zorder=1)
+        q10, q25, q50, q75, q90 = np.percentile(ratio, [10, 25, 50, 75, 90], axis=1)
+        ax.fill_between(time, q10, q90, color="#4c78a8", alpha=0.18, lw=0, zorder=2,
+                        label="10-90%")
+        ax.fill_between(time, q25, q75, color="#4c78a8", alpha=0.38, lw=0, zorder=3,
+                        label="25-75%")
+        ax.plot(time, q50, color="#08306b", lw=2.0, zorder=4, label="median")
+        ax.axhline(1.0, color="#d62728", ls="--", lw=1.3, zorder=5, label="target")
+
+        ax.set_yscale("log")
+        ax.set_xlabel("Time")
+        ax.set_title(f"{r.name}  ($n={ns}$)")
+        ax.grid(True, which="both", alpha=0.22)
+    axes[0].set_ylabel(r"Simulated / target,  $s_i(t)\,/\,\mu_i$")
+    axes[0].set_ylim(1e-2, 1e2)  # shared: two decades around the target
+    # Single shared legend.
+    handles, labs = axes[-1].get_legend_handles_labels()
+    fig.legend(handles, labs, loc="outside lower center", ncol=4, fontsize=9)
+
+    fig.savefig(out_path)
+    plt.close(fig)
+
+
 def plot_scaling(results: list[ScenarioResult], out_path: Path) -> None:
     """Total wall time and peak RAM vs input size — primary scaling figure."""
     sizes_mb = [r.input_size_bytes / 1024 / 1024 for r in results]
@@ -811,6 +865,63 @@ def plot_scaling(results: list[ScenarioResult], out_path: Path) -> None:
     plt.tight_layout()
     plt.savefig(out_path, dpi=150)
     plt.close()
+
+
+def _stage_bars(ax, results: list[ScenarioResult], attr: str, ylabel: str, fmt: str) -> None:
+    """Grouped per-stage bars (one cluster per scenario) on a provided axis."""
+    scenarios = [r.name for r in results]
+    x = np.arange(len(scenarios), dtype=float)
+    width = 0.8 / len(STAGE_ORDER)
+    for i, sname in enumerate(STAGE_ORDER):
+        vals = [next((getattr(s, attr) for s in r.stages if s.name == sname), 0.0) for r in results]
+        bars = ax.bar(x + i * width - 0.4 + width / 2, vals, width, label=sname,
+                      color=_STAGE_COLORS[i], edgecolor="black", linewidth=0.4)
+        _annotate_bars(ax, bars, vals, fmt=fmt)
+    ax.set_xticks(x)
+    ax.set_xticklabels(scenarios)
+    ax.set_ylabel(ylabel)
+    ax.set_yscale("log")
+    ax.grid(True, axis="y", which="both", alpha=0.3)
+
+
+def plot_performance_combined(results: list[ScenarioResult], out_path: Path) -> None:
+    """Single performance figure covering all scenarios together: scaling of total
+    wall time and peak memory with input size (top row), and the per-stage breakdown
+    of time and memory (bottom row)."""
+    results = sorted(results, key=lambda r: r.input_size_bytes)
+    sizes = [r.input_size_bytes / 1024 / 1024 for r in results]
+    totals = [sum(s.wall_s for s in r.stages) for r in results]
+    peaks = [max((s.peak_rss_mb for s in r.stages), default=0.0) for r in results]
+    labels = [r.name for r in results]
+
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8.5), layout="constrained")
+
+    # --- top row: scaling vs input size ---
+    for ax, ys, ylabel, color, title in (
+        (axes[0, 0], totals, "Total wall-clock time (s)", "#1f3b73", "(a) Time scaling"),
+        (axes[0, 1], peaks, "Peak memory (MB)", "#b5462f", "(b) Memory scaling"),
+    ):
+        ax.plot(sizes, ys, "o-", color=color, lw=1.8, ms=7, mec="black", mew=0.5)
+        for xx, yy, lbl in zip(sizes, ys, labels):
+            ax.annotate(lbl, (xx, yy), textcoords="offset points", xytext=(7, 6), fontsize=9)
+        ax.set_xscale("log"); ax.set_yscale("log")
+        ax.set_xlabel("Combined input size (MB)")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.grid(True, which="both", alpha=0.25)
+
+    # --- bottom row: per-stage breakdown ---
+    _stage_bars(axes[1, 0], results, "wall_s", "Wall time per stage (s)", "{:.1f}")
+    axes[1, 0].set_title("(c) Time by stage")
+    _stage_bars(axes[1, 1], results, "peak_rss_mb", "Peak RSS per stage (MB)", "{:.0f}")
+    axes[1, 1].set_title("(d) Memory by stage")
+    # Shared stage legend below the bottom row.
+    handles, labs = axes[1, 0].get_legend_handles_labels()
+    fig.legend(handles, labs, title="Pipeline stage", loc="outside lower center",
+               ncol=len(STAGE_ORDER), fontsize=8.5)
+
+    fig.savefig(out_path)
+    plt.close(fig)
 
 
 # Output dir housekeeping -----------------------------------------------------
